@@ -276,7 +276,7 @@ def main():
             aux_val += float(aux.detach()) if torch.is_tensor(aux) else float(aux)
             byte_count += float(bpt[flat_y].sum())
             tok_count += flat_y.numel()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+        torch.nn.utils.clip_grad_norm_(params, args.grad_clip)
         opt.step()
         if (
             isinstance(retriever, KNNRetriever)
