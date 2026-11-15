@@ -1,0 +1,14 @@
+{
+  "id": "shem42/nanlmv9-100m-chunk4-scan",
+  "title": "nanlmv9 100M chunk4 scan",
+  "code_file": "kaggle_100m_chunk.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": [],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "model_sources": []
+}

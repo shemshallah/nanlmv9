@@ -373,8 +373,10 @@ class MambaMoE(nn.Module):
         self.head = nn.Linear(d_model, vocab_size, bias=False)
         self.head.weight = self.embed.weight
 
-    def _embed(self, idx):
+    def _embed(self, idx, extra=None):
         x = self.embed(idx)
+        if extra is not None:
+            x = x + extra
         if self.local_context:
             b, l = idx.shape
             for k in range(1, self.local_context + 1):
@@ -384,8 +386,8 @@ class MambaMoE(nn.Module):
                 x = x + self.local_alpha[k - 1] * self.embed(prev)
         return x
 
-    def forward(self, idx):
-        x = self._embed(idx)
+    def forward(self, idx, extra=None):
+        x = self._embed(idx, extra=extra)
         aux = 0.0
         bottom = x
         bottom_probs = None
@@ -412,9 +414,9 @@ class MambaMoE(nn.Module):
         x = self.norm(x)
         return self.head(x), aux
 
-    def encode(self, idx):
+    def encode(self, idx, extra=None):
         """Hidden states before the token head, for SSM-state retrieval."""
-        x = self._embed(idx)
+        x = self._embed(idx, extra=extra)
         bottom = x
         bottom_probs = None
         if self.bottom_moe is not None:

@@ -84,9 +84,19 @@ class WordCharMamba(torch.nn.Module):
         )
         self.word_to_char = torch.nn.Linear(d_model, char_model, bias=False)
 
-    def forward(self, token_ids, byte_ids):
+    def forward(self, token_ids, byte_ids, token_lengths=None):
+        word_hidden = self.word.encode(token_ids)
+        char_extra = None
+        if token_lengths is not None:
+            ctx = torch.repeat_interleave(word_hidden, token_lengths, dim=1)
+            if ctx.shape[1] > byte_ids.shape[1]:
+                ctx = ctx[:, : byte_ids.shape[1]]
+            elif ctx.shape[1] < byte_ids.shape[1]:
+                pad = ctx[:, -1:].expand(-1, byte_ids.shape[1] - ctx.shape[1], -1)
+                ctx = torch.cat([ctx, pad], dim=1)
+            char_extra = self.word_to_char(ctx)
         word_logits, word_aux = self.word(token_ids)
-        char_logits, char_aux = self.char(byte_ids)
+        char_logits, char_aux = self.char(byte_ids, extra=char_extra)
         return word_logits, char_logits, word_aux + char_aux
 
     def params(self):
