@@ -1,0 +1,52 @@
+{
+ "version": "v9_dev",
+ "train_files": [
+  "tinyshakespeare.txt",
+  "wt2_train.txt"
+ ],
+ "bpe_merges": 2000,
+ "valid40": {
+  "frozen": {
+   "n_bytes": 16000,
+   "nats": 1.10640626281589,
+   "nats_se": 0.011256513536038378,
+   "bpc": 1.5962068285729756,
+   "byte_top1": 0.6763125,
+   "byte_top1_se": 0.003699050429821757,
+   "byte_top5": 0.884125,
+   "byte_top5_se": 0.0025304938719328575,
+   "n_words": 2590,
+   "word_top1": 0.14324324324324325,
+   "word_top5": 0.45366795366795365,
+   "n_sents": 122,
+   "sent_top1_strict": 0.0,
+   "sent_top5_strict": 0.0,
+   "sent_mean_byte_acc_top1": 0.6708086751068183,
+   "sent_mean_byte_acc_top5": 0.8813510647273317
+  },
+  "online": {
+   "n_bytes": 16000,
+   "nats": 1.0782656576917433,
+   "nats_se": 0.011405128327520752,
+   "bpc": 1.5556085171127547,
+   "byte_top1": 0.680625,
+   "byte_top1_se": 0.0036860225526410798,
+   "byte_top5": 0.8855625,
+   "byte_top5_se": 0.002516792264434189,
+   "n_words": 2590,
+   "word_top1": 0.1552123552123552,
+   "word_top5": 0.45714285714285713,
+   "n_sents": 122,
+   "sent_top1_strict": 0.0,
+   "sent_top5_strict": 0.00819672131147541,
+   "sent_mean_byte_acc_top1": 0.6710879320493782,
+   "sent_mean_byte_acc_top5": 0.8818236937313165
+  },
+  "curve_lines": [
+   "EVAL frozen @1048576 bytes: nats=2.6297 bpc=3.7938 top1=0.4160 top5=0.7186 n=16000",
+   "EVAL frozen @3212546 bytes: nats=1.2193 bpc=1.7591 top1=0.6419 top5=0.8712 n=16000",
+   "EVAL frozen @6096130 bytes: nats=1.1568 bpc=1.6688 top1=0.6600 top5=0.8809 n=16000"
+  ]
+ },
+ "wall_s": 101.46405744552612
+}

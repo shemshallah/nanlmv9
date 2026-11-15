@@ -1,0 +1,270 @@
+name: v9 dev release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (blank = dev-v9-<run>-<sha>; must start with dev-v9-)"
+        required: false
+        type: string
+      tshift:
+        description: "Hash table shift (-1 = published config, 1 = larger, 2 = compact default)"
+        required: false
+        default: "2"
+        type: choice
+        options:
+          - "-1"
+          - "1"
+          - "2"
+          - "3"
+      keep:
+        description: "Number of dev-v9-* releases to keep after publishing"
+        required: false
+        default: "3"
+        type: string
+      publish_weights:
+        description: "Upload the trained checkpoint (weights)"
+        required: false
+        default: true
+        type: boolean
+  push:
+    tags:
+      - "dev-v9-*"
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: v9-dev-release
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  GH_REPO: ${{ github.repository }}
+  PYTHONHASHSEED: "0"
+
+jobs:
+  release:
+    name: build, train, publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential
+          python -m pip install --disable-pip-version-check numpy
+
+      - name: Fetch public corpora
+        run: bash scripts/fetch_corpora.sh v9/corpora
+
+      - name: Build v9 C core
+        run: make -C v9 CFLAGS="-O3 -Wall -Wextra -march=x86-64-v2"
+
+      - name: Verify C/Python BPE parity
+        run: |
+          python3 scripts/verify_bpe.py \
+            --nancm v9/nancm \
+            --merges v9/bpe_merges.txt \
+            --sample v9/corpora/wt2_test.txt
+
+      - name: Resolve release inputs
+        id: cfg
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag='${{ inputs.tag }}'
+          if [[ -z "$tag" ]]; then
+            if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+              tag="$GITHUB_REF_NAME"
+            else
+              tag="dev-v9-${GITHUB_RUN_NUMBER}-$(git rev-parse --short=12 HEAD)"
+            fi
+          fi
+          if [[ ! "$tag" =~ ^dev-v9-[A-Za-z0-9._-]+$ ]]; then
+            echo "Invalid tag '$tag': must match ^dev-v9-[A-Za-z0-9._-]+$" >&2
+            exit 2
+          fi
+
+          tshift='${{ inputs.tshift }}'; tshift="${tshift:-2}"
+          keep='${{ inputs.keep }}'; keep="${keep:-3}"
+          publish='${{ inputs.publish_weights }}'; publish="${publish:-true}"
+
+          if [[ ! "$tshift" =~ ^-?[0-9]+$ ]] || (( tshift < -1 || tshift > 4 )); then
+            echo "Invalid tshift '$tshift' (expected -1..4)" >&2
+            exit 2
+          fi
+          if [[ ! "$keep" =~ ^[0-9]+$ ]] || (( keep < 1 || keep > 20 )); then
+            echo "Invalid keep '$keep' (expected 1..20)" >&2
+            exit 2
+          fi
+          if [[ "$publish" != "true" && "$publish" != "false" ]]; then
+            echo "Invalid publish_weights '$publish'" >&2
+            exit 2
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "tshift=$tshift" >> "$GITHUB_OUTPUT"
+          echo "keep=$keep" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "short=$(git rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Train and evaluate (dev / wt2-valid40)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out release
+          args=(dev --corpora v9/corpora --out out
+                --tshift '${{ steps.cfg.outputs.tshift }}'
+                --tag dev)
+          if [[ '${{ steps.cfg.outputs.publish }}' == "true" ]]; then
+            args+=(--save "$PWD/out/nanlmv9-weights.ckpt")
+          fi
+          python3 v9/run_v9.py "${args[@]}" | tee out/run.log
+
+      - name: Verify checkpoint round-trip
+        if: steps.cfg.outputs.publish == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 v9/run_v9.py dev --evalonly \
+            --load out/nanlmv9-weights.ckpt \
+            --out out/roundtrip --tag roundtrip \
+            --tshift '${{ steps.cfg.outputs.tshift }}'
+          cmp out/dev_valid40_frozen.bin out/roundtrip/roundtrip_valid40_frozen.bin
+          echo "checkpoint round-trip: frozen results identical"
+
+      - name: Package release assets
+        shell: bash
+        env:
+          TAG: ${{ steps.cfg.outputs.tag }}
+          TSHIFT: ${{ steps.cfg.outputs.tshift }}
+          COMMIT: ${{ steps.cfg.outputs.commit }}
+          SHORT: ${{ steps.cfg.outputs.short }}
+          PUBLISH: ${{ steps.cfg.outputs.publish }}
+        run: |
+          set -euo pipefail
+          cp v9/nancm release/nancm-linux-x86_64
+          cp v9/bpe_merges.txt release/
+          cp v9/win_valid40.bin release/
+          cp out/metrics_dev.json release/
+          cp out/run.log release/train-eval.log
+          if [[ "$PUBLISH" == "true" && -s out/nanlmv9-weights.ckpt ]]; then
+            mv out/nanlmv9-weights.ckpt "release/nanlmv9-weights-${TAG}.ckpt"
+          fi
+          tar -czf "release/nanlmv9-source-${TAG}.tar.gz" \
+            README.md LICENSE Makefile \
+            v9/nancm.c v9/bpe.py v9/bpe_merges.txt v9/mkwin.py v9/run_v9.py \
+            v9/win_valid40.bin v9/win_test10.bin v9/win_test40.bin \
+            scripts .github/workflows
+
+          python3 - "$TAG" "$TSHIFT" "$COMMIT" "$SHORT" "$PUBLISH" <<'PY'
+          import json, os, sys
+          tag, tshift, commit, short, publish = sys.argv[1:6]
+          m = json.load(open("out/metrics_dev.json"))
+          v = m["valid40"]
+          manifest = {
+              "repo": os.environ.get("GITHUB_REPOSITORY"),
+              "tag": tag,
+              "commit": commit,
+              "short_commit": short,
+              "run_url": f"{os.environ.get('GITHUB_SERVER_URL','https://github.com')}/{os.environ.get('GITHUB_REPOSITORY')}/actions/runs/{os.environ.get('GITHUB_RUN_ID')}",
+              "tshift": int(tshift),
+              "weights_published": publish == "true",
+              "metrics_file": "metrics_dev.json",
+              "frozen": {k: v["frozen"][k] for k in ("nats","bpc","byte_top1","byte_top5","word_top1","word_top5","sent_mean_byte_acc_top1")},
+              "online": {k: v["online"][k] for k in ("nats","bpc","byte_top1","byte_top5","word_top1","word_top5","sent_mean_byte_acc_top1")},
+              "wall_s": m.get("wall_s"),
+          }
+          json.dump(manifest, open("release/manifest.json","w"), indent=1)
+
+          lines = [
+              "## NaN v9 development release",
+              "",
+              f"- tag: `{tag}`",
+              f"- commit: `{commit}`",
+              f"- run: {manifest['run_url']}",
+              f"- `-tshift {tshift}`",
+              f"- weights: {'checkpoint attached' if publish == 'true' else 'not published'}",
+              "",
+              "| eval | mode | bpc | byte top1 | byte top5 |",
+              "|---|---|---:|---:|---:|",
+          ]
+          for mode in ("frozen","online"):
+              e = manifest[mode]
+              lines.append(f"| valid40 | {mode} | {e['bpc']:.4f} | {e['byte_top1']*100:.2f}% | {e['byte_top5']*100:.2f}% |")
+          lines += [
+              "",
+              "### Weights",
+              "",
+              f"`nanlmv9-weights-{tag}.ckpt` is the complete learned state (context tables,",
+              "match model, mixers, APMs). Load it with:",
+              "",
+              "```sh",
+              "v9/nancm -bpe v9/bpe_merges.txt -load nanlmv9-weights.ckpt \\",
+              "  -eval v9/win_valid40.bin -noonline -o out/loaded",
+              "```",
+              "",
+              f"Published by `v9 dev release` run {os.environ.get('GITHUB_RUN_NUMBER')}.",
+          ]
+          open("release/RELEASE_NOTES.md","w").write("\n".join(lines) + "\n")
+          PY
+
+          cd release
+          find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' \
+            | sort | xargs sha256sum > SHA256SUMS
+          ls -lh
+
+      - name: Create prerelease
+        shell: bash
+        env:
+          TAG: ${{ steps.cfg.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" release/* \
+            --title "NaN v9 dev ${TAG}" \
+            --notes-file release/RELEASE_NOTES.md \
+            --prerelease
+
+      - name: Prune old dev releases
+        if: success() && steps.cfg.outputs.tag != ''
+        shell: bash
+        env:
+          KEEP: ${{ steps.cfg.outputs.keep }}
+        run: bash scripts/prune_releases.sh "$KEEP" false
+
+      - name: Job summary
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f release/RELEASE_NOTES.md ]]; then
+            cat release/RELEASE_NOTES.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          {
+            echo ""
+            echo "### Releases after cleanup"
+            echo '```'
+            gh release list --limit 20 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload workflow artifact (backup)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nanlmv9-dev-${{ steps.cfg.outputs.short }}
+          path: release/
+          if-no-files-found: warn
+          retention-days: 14

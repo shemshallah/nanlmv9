@@ -1,0 +1,38 @@
+name: prune dev releases
+
+on:
+  workflow_dispatch:
+    inputs:
+      keep:
+        description: "Number of dev-v9-* releases to keep"
+        required: false
+        default: "3"
+        type: string
+      dry_run:
+        description: "Only print what would be deleted"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  GH_REPO: ${{ github.repository }}
+
+jobs:
+  prune:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prune dev-v9-* releases
+        shell: bash
+        run: |
+          set -euo pipefail
+          keep='${{ inputs.keep }}'; keep="${keep:-3}"
+          dry='${{ inputs.dry_run }}'; dry="${dry:-true}"
+          bash scripts/prune_releases.sh "$keep" "$dry"

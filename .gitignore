@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+/v9/nancm
+/v9/corpora/
+/out/
+/release/
+*.ckpt
