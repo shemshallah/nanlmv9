@@ -16,12 +16,13 @@ only smoke-tested / needs a longer run; `[ ]` still open.
 - [x] expert-pair matrix in routing (mean-field)
 - [x] expert-pair matrix in selected-expert mixture gates
 - [x] two pair matrices: bottom concept cloud + top concept layer
+- [x] top MoE uses bottom expert probabilities as router specialization extensions (256x256 `bottom_to_top`)
 - [x] sandwich mirror bridge with 256 learned mirror points between them
 - [~] hierarchical concept-cloud → Mamba → top concept layer
   - implemented as bottom MoE + mirror points + Mamba blocks + top MoE
   - needs a longer GPU run before quality claims
 - [x] local-context path (previous-token embeddings; 0/4/8/16 sweepable)
-- [x] retrieval fusion: add and confidence-gated modes
+- [x] retrieval fusion: add, confidence, deep confidence mixture
 
 ## Retrieval
 
@@ -38,7 +39,7 @@ only smoke-tested / needs a longer run; `[ ]` still open.
 - [x] `CMBytePrior` loader with residual smoothing
 - [x] real CM prior + token→byte + neural gate smoke
 - [x] learned gate relies on CM (mean 0.791 CM weight on the smoke)
-- [~] train the full Mamba model on the CM residual (gate-only smoke done)
+- [~] full Mamba model backward through token->byte trie + CM prior (`train_byte_residual.py`, smoke done)
 - [ ] v9 CM prior dump for the full 1.12 MB valid split (currently 8×4k windows)
 - [ ] train/validate the hybrid on the full valid split
 
@@ -58,6 +59,7 @@ only smoke-tested / needs a longer run; `[ ]` still open.
 
 - [x] 10M-class CPU preset (`presets.py`)
 - [x] 100M-class GPU preset (112.9M parameters)
+- [x] d512 preset (53.2M parameters)
 - [x] 5-minute wall-clock budget (`--max-seconds`)
 - [x] CPU AMP-safe path / GPU AMP option (`--amp`)
 - [x] vectorized expert matmuls
@@ -91,6 +93,7 @@ only smoke-tested / needs a longer run; `[ ]` still open.
 
 ## Release / repo
 
+- [x] master.py canonical + experimental.py promotion split
 - [x] code pushed to `shemshallah/nanlmv9`
 - [x] self-test (`selftest.py`)
 - [x] README with measured results and caveats

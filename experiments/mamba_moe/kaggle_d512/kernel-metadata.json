@@ -1,0 +1,14 @@
+{
+  "id": "shem42/nanlmv9-d512-gpu-smoke",
+  "title": "nanlmv9 d512 GPU smoke",
+  "code_file": "kaggle_d512.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": [],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "model_sources": []
+}

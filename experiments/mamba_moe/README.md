@@ -360,7 +360,55 @@ The token-level neural distribution can be converted to exact byte
 probabilities with a token trie, or the neural model can be trained directly on
 bytes.
 
-## 10. What to scale
+## 10. Master / experimental split
+
+- `master.py` — canonical stable entry point.  It forces the prior/context gate
+  when no prior or retrieval is specified, supports the d512 preset, top
+  extension, deep retrieval, CM-gate hook, and scan modes.
+- `train.py` — compatibility wrapper around `master.py`.
+- `experimental.py` — byte-residual loss, `WordCharMamba` prototype,
+  `DeepRetrievalFusion`, and the context-set registry.  Promote a variant into
+  `master.py` only after a matched-compute ablation.
+
+### Top extension
+
+When `sandwich=True`, the bottom MoE returns its 256-way expert distribution.
+A learned 256×256 `bottom_to_top` matrix maps it to a router bias for the top
+MoE:
+
+```
+top_logits = top_router(x) + bottom_probs @ bottom_to_top^T
+```
+
+The top experts are therefore extensions of the bottom specialization, not an
+independent parallel MoE.
+
+### d512 preset
+
+`presets.py` includes a **53,199,381-parameter d512** configuration:
+6 SSM layers, 128 experts, rank 16, FFN MoE, bottom/top sandwich, two pair
+matrices, 256 mirror points, local context 4.
+
+### Real byte-residual training
+
+`train_byte_residual.py` runs the full model backward through:
+
+```
+token logits -> token->byte trie -> gated CM prior -> byte NLL
+```
+
+A 10-step CPU smoke on 16-token windows reached ~2.1–2.4 byte bpc; it is an
+overfit/wiring smoke, not a benchmark.  The full-corpus version needs a CM
+prior dump for the full training stream.
+
+### Word+char hierarchy
+
+`experimental.WordCharMamba` is the custom Mamba word branch plus a custom
+Mamba character branch; no transformer.  `WordCharMamba(32000, ...)` runs a
+word stream and a byte stream and returns both logits.  The exact byte
+likelihood remains the token→byte trie path.
+
+## 11. What to scale
 
 - 100M–300M parameters on 10B–30B tokens is the first serious target.
 - 1B parameters on ~100B tokens is the first frontier-relevant run.
