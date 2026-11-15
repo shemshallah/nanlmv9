@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""256-wide selective state-space (Mamba-style) trunk over a 256-expert MoE bottom.
+"""Configurable 256-expert MoE + selective-SSM language model.
 
-This is a compact, CPU-runnable prototype of the architecture discussed for
-NaN v9+:
-
-  bytes -> embeddings
-        -> 256 low-rank experts (top-k router, shared expert)
-        -> N selective SSM blocks (d_model=256, d_state=16)
-        -> tied 32k token head
-
-The MoE is deliberately low-rank so 256 experts fit in phone RAM
-(256 * 2 * d_model * rank parameters instead of 256 full MLPs).
+Ablation axes
+-------------
+moe_position : none | bottom | ffn | both
+    - bottom: one MoE on the token embeddings
+    - ffn:    a MoE FFN inside every SSM block
+    - both:   both of the above
+use_shared   : include a dense shared expert in each MoE
+pair_matrix  : integrate a learned E x E expert-pair adjacency matrix
+               through a mean-field pair adjustment of the router logits
+pair_symmetric: symmetrize the pair matrix (C(256,2) semantics)
+ffn_mode     : dense | moe (only used when moe_position is none/ffn/both)
 """
 import math
 
@@ -30,34 +31,78 @@ class RMSNorm(nn.Module):
 
 
 class LowRankMoE(nn.Module):
-    """256 (or N) low-rank experts + one dense shared expert."""
+    """E low-rank experts + optional dense shared expert + pair adjacency."""
 
-    def __init__(self, d_model, n_experts=256, rank=8, top_k=2, shared_hidden=512):
+    def __init__(
+        self,
+        d_model,
+        n_experts=256,
+        rank=8,
+        top_k=2,
+        shared_hidden=512,
+        use_shared=True,
+        pair_matrix=False,
+        pair_symmetric=True,
+    ):
         super().__init__()
         self.n_experts = n_experts
         self.top_k = top_k
+        self.use_shared = use_shared
+        self.pair_symmetric = pair_symmetric
         self.router = nn.Linear(d_model, n_experts, bias=False)
         self.down = nn.Parameter(torch.empty(n_experts, d_model, rank))
         self.up = nn.Parameter(torch.empty(n_experts, rank, d_model))
-        self.shared = nn.Sequential(
-            nn.Linear(d_model, shared_hidden, bias=False),
-            nn.SiLU(),
-            nn.Linear(shared_hidden, d_model, bias=False),
-        )
         nn.init.normal_(self.router.weight, std=0.02)
         nn.init.normal_(self.down, std=1.0 / math.sqrt(d_model))
         nn.init.normal_(self.up, std=1.0 / math.sqrt(rank))
+
+        if use_shared:
+            self.shared = nn.Sequential(
+                nn.Linear(d_model, shared_hidden, bias=False),
+                nn.SiLU(),
+                nn.Linear(shared_hidden, d_model, bias=False),
+            )
+        else:
+            self.shared = None
+
+        if pair_matrix:
+            # E x E pair adjacency.  For C(256,2) semantics we symmmetrize it.
+            self.pair_bias = nn.Parameter(torch.zeros(n_experts, n_experts))
+            self.pair_scale = nn.Parameter(torch.tensor(0.1))
+        else:
+            self.pair_bias = None
+            self.pair_scale = None
+
         self.aux_loss = 0.0
+        self.pair_reg = 0.0
+
+    def _pair_adjust(self, logits, flat):
+        """Mean-field pair interaction.
+
+        p = softmax(logits); pair = p @ B; logits += g * pair.
+        Every expert's score is adjusted by its expected compatibility with the
+        current expert distribution.  This uses the full E x E matrix and is
+        differentiable.
+        """
+        if self.pair_bias is None:
+            return logits
+        b = self.pair_bias
+        if self.pair_symmetric:
+            b = 0.5 * (b + b.transpose(0, 1))
+        p = F.softmax(logits, dim=-1)
+        pair = p @ b
+        return logits + F.softplus(self.pair_scale) * pair
 
     def forward(self, x):
         b, l, d = x.shape
         flat = x.reshape(-1, d)
         logits = self.router(flat)
+        logits = self._pair_adjust(logits, flat)
         probs = F.softmax(logits, dim=-1)
         topv, topi = torch.topk(probs, self.top_k, dim=-1)
         topv = topv / topv.sum(-1, keepdim=True).clamp_min(1e-9)
 
-        out = self.shared(flat)
+        out = self.shared(flat) if self.shared is not None else torch.zeros_like(flat)
         for e in range(self.n_experts):
             mask = topi == e
             if not mask.any():
@@ -68,10 +113,11 @@ class LowRankMoE(nn.Module):
             h = h @ self.up[e]
             out.index_add_(0, tok_idx, h * topv[tok_idx, slot].unsqueeze(-1))
 
-        # Switch-style load balancing: importance x load.
         importance = probs.mean(0)
         load = F.one_hot(topi, self.n_experts).float().mean(dim=(0, 1))
         self.aux_loss = self.n_experts * (importance * load).sum()
+        if self.pair_bias is not None:
+            self.pair_reg = self.pair_bias.pow(2).mean()
         return out.reshape(b, l, d)
 
 
@@ -134,14 +180,43 @@ class SelectiveSSM(nn.Module):
         return self.out_proj(y)
 
 
-class MambaBlock(nn.Module):
-    def __init__(self, d_model, d_state=16, expand=2):
+class DenseFFN(nn.Module):
+    def __init__(self, d_model, hidden=None):
         super().__init__()
-        self.norm = RMSNorm(d_model)
-        self.ssm = SelectiveSSM(d_model, d_state=d_state, expand=expand)
+        hidden = hidden or 4 * d_model
+        self.net = nn.Sequential(
+            nn.Linear(d_model, hidden, bias=False),
+            nn.SiLU(),
+            nn.Linear(hidden, d_model, bias=False),
+        )
 
     def forward(self, x):
-        return x + self.ssm(self.norm(x))
+        return self.net(x)
+
+
+class MambaBlock(nn.Module):
+    def __init__(
+        self,
+        d_model,
+        d_state=16,
+        expand=2,
+        ffn_mode="dense",
+        moe_kwargs=None,
+        ffn_hidden=None,
+    ):
+        super().__init__()
+        self.norm1 = RMSNorm(d_model)
+        self.ssm = SelectiveSSM(d_model, d_state=d_state, expand=expand)
+        self.norm2 = RMSNorm(d_model)
+        if ffn_mode == "moe":
+            self.ffn = LowRankMoE(d_model, **(moe_kwargs or {}))
+        else:
+            self.ffn = DenseFFN(d_model, ffn_hidden)
+
+    def forward(self, x):
+        x = x + self.ssm(self.norm1(x))
+        x = x + self.ffn(self.norm2(x))
+        return x
 
 
 class MambaMoE(nn.Module):
@@ -155,27 +230,69 @@ class MambaMoE(nn.Module):
         rank=8,
         top_k=2,
         shared_hidden=512,
+        moe_position="bottom",   # none | bottom | ffn | both
+        use_shared=True,
+        pair_matrix=False,
+        pair_symmetric=True,
+        ffn_hidden=None,
     ):
         super().__init__()
         self.vocab_size = vocab_size
+        self.moe_position = moe_position
         self.embed = nn.Embedding(vocab_size, d_model)
-        self.moe = LowRankMoE(d_model, n_experts, rank, top_k, shared_hidden)
+        nn.init.normal_(self.embed.weight, std=0.02)
+
+        moe_kwargs = dict(
+            n_experts=n_experts,
+            rank=rank,
+            top_k=top_k,
+            shared_hidden=shared_hidden,
+            use_shared=use_shared,
+            pair_matrix=pair_matrix,
+            pair_symmetric=pair_symmetric,
+        )
+        self.bottom_moe = None
+        if moe_position in ("bottom", "both"):
+            self.bottom_moe = LowRankMoE(d_model, **moe_kwargs)
+
+        ffn_mode = "moe" if moe_position in ("ffn", "both") else "dense"
         self.blocks = nn.ModuleList(
-            [MambaBlock(d_model, d_state=d_state) for _ in range(n_layers)]
+            [
+                MambaBlock(
+                    d_model,
+                    d_state=d_state,
+                    ffn_mode=ffn_mode,
+                    moe_kwargs=moe_kwargs,
+                    ffn_hidden=ffn_hidden,
+                )
+                for _ in range(n_layers)
+            ]
         )
         self.norm = RMSNorm(d_model)
         self.head = nn.Linear(d_model, vocab_size, bias=False)
         self.head.weight = self.embed.weight
-        nn.init.normal_(self.embed.weight, std=0.02)
 
     def forward(self, idx):
         x = self.embed(idx)
-        x = x + self.moe(x)
-        aux = self.moe.aux_loss
+        aux = 0.0
+        if self.bottom_moe is not None:
+            x = x + self.bottom_moe(x)
+            aux = aux + self.bottom_moe.aux_loss
         for blk in self.blocks:
             x = blk(x)
+            if isinstance(blk.ffn, LowRankMoE):
+                aux = aux + blk.ffn.aux_loss
         x = self.norm(x)
         return self.head(x), aux
+
+    def encode(self, idx):
+        """Hidden states before the token head, for SSM-state retrieval."""
+        x = self.embed(idx)
+        if self.bottom_moe is not None:
+            x = x + self.bottom_moe(x)
+        for blk in self.blocks:
+            x = blk(x)
+        return self.norm(x)
 
 
 def count_params(model):

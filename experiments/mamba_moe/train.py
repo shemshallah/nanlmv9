@@ -11,6 +11,8 @@ import torch
 import torch.nn.functional as F
 
 from model import MambaMoE, count_params
+from hybrid import NGramPrior, ContextGate, mixture_logits
+from retrieval import build_retriever, KNNRetriever
 
 
 def load_meta(data_dir):
@@ -31,8 +33,20 @@ def get_batch(arr, bs, seq, device):
     )
 
 
+def retrieval_contexts(x, order):
+    b, l = x.shape
+    ctx = torch.zeros(b, l, order, dtype=torch.long, device=x.device)
+    for t in range(l):
+        s = max(0, t - order + 1)
+        ctx[:, t, order - (t - s + 1) :] = x[:, s : t + 1]
+        if s == 0 and t + 1 < order:
+            ctx[:, t, : order - (t + 1)] = x[:, :1]
+    return ctx.reshape(-1, order)
+
+
 @torch.no_grad()
-def evaluate(model, arr, bpt, seq, batch, device, max_batches=None):
+def evaluate(model, arr, bpt, seq, batch, device, max_batches=None, prior=None, gate=None,
+             prior_weight=1.0, retriever=None, retrieval_weight=0.5, retrieval_order=4):
     model.eval()
     ce_sum = 0.0
     byte_sum = 0.0
@@ -45,7 +59,20 @@ def evaluate(model, arr, bpt, seq, batch, device, max_batches=None):
         x = torch.from_numpy(np.asarray(arr[start : start + seq]).astype(np.int64)).to(device)[None]
         y = torch.from_numpy(np.asarray(arr[start + 1 : start + seq + 1]).astype(np.int64)).to(device)[None]
         logits, _ = model(x)
-        ce = F.cross_entropy(logits.reshape(-1, logits.shape[-1]), y.reshape(-1), reduction="sum")
+        logits = logits.reshape(-1, logits.shape[-1])
+        if prior is not None:
+            pl = prior.logits(x.reshape(-1)).to(device)
+            extra = torch.linspace(0, 1, logits.shape[0], device=device)[:, None]
+            mixed, _ = mixture_logits(logits, pl, gate, prior_weight, extra=extra)
+            logits = mixed
+        if retriever is not None:
+            if isinstance(retriever, KNNRetriever):
+                h = model.encode(x)
+                rl = retriever.logits(h).to(device)
+            else:
+                rl = retriever.logits(retrieval_contexts(x, retrieval_order)).to(device)
+            logits = logits + retrieval_weight * rl
+        ce = F.cross_entropy(logits, y.reshape(-1), reduction="sum")
         ce_sum += float(ce)
         byte_sum += float(bpt[y.reshape(-1)].sum())
         tok_sum += y.numel()
@@ -63,6 +90,21 @@ def evaluate(model, arr, bpt, seq, batch, device, max_batches=None):
     }
 
 
+def build_knn(retriever, model, arr, seq, device, max_items=50_000):
+    hs, ys = [], []
+    n = len(arr)
+    for start in range(0, n - seq - 1, seq):
+        x = torch.from_numpy(np.asarray(arr[start : start + seq]).astype(np.int64)).to(device)[None]
+        y = torch.from_numpy(np.asarray(arr[start + 1 : start + seq + 1]).astype(np.int64)).to(device)[None]
+        h = model.encode(x)
+        hs.append(h.reshape(-1, h.shape[-1]).cpu())
+        ys.append(y.reshape(-1).cpu())
+        if sum(len(v) for v in hs) >= max_items:
+            break
+    retriever.build(torch.cat(hs), torch.cat(ys))
+    print(f"kNN datastore: {retriever.keys.shape[0]:,} states")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data-dir", default=os.path.expanduser("~/nanlm-data/tok32k_mixed"))
@@ -77,6 +119,23 @@ def main():
     ap.add_argument("--rank", type=int, default=8)
     ap.add_argument("--top-k", type=int, default=2)
     ap.add_argument("--shared-hidden", type=int, default=512)
+    ap.add_argument("--moe-position", choices=("none", "bottom", "ffn", "both"), default="bottom")
+    ap.add_argument("--no-shared", action="store_true", help="disable the dense shared expert")
+    ap.add_argument("--pair-matrix", action="store_true", help="enable E x E expert-pair adjacency")
+    ap.add_argument("--pair-asymmetric", action="store_true", help="do not symmetrize the pair matrix")
+    ap.add_argument("--ffn-hidden", type=int, default=None)
+    ap.add_argument("--prior", choices=("none", "unigram", "bigram"), default="none")
+    ap.add_argument("--prior-weight", type=float, default=1.0)
+    ap.add_argument("--prior-tokens", type=int, default=2_000_000)
+    ap.add_argument("--context-gate", action="store_true", help="learn neural mixture weights for prior/neural")
+    ap.add_argument("--gate-hidden", type=int, default=64)
+    ap.add_argument("--pair-reg", type=float, default=1e-4)
+    ap.add_argument("--retrieval", choices=("none", "multimatch", "suffix", "knn"), default="none")
+    ap.add_argument("--retrieval-tokens", type=int, default=500_000)
+    ap.add_argument("--retrieval-items", type=int, default=50_000)
+    ap.add_argument("--retrieval-weight", type=float, default=0.5)
+    ap.add_argument("--retrieval-build-step", type=int, default=1)
+    ap.add_argument("--retrieval-order", type=int, default=4)
     ap.add_argument("--lr", type=float, default=3e-4)
     ap.add_argument("--min-lr", type=float, default=3e-5)
     ap.add_argument("--warmup", type=int, default=50)
@@ -85,11 +144,13 @@ def main():
     ap.add_argument("--grad-clip", type=float, default=1.0)
     ap.add_argument("--grad-accum", type=int, default=1)
     ap.add_argument("--threads", type=int, default=0)
+    ap.add_argument("--device", default="cpu", help="cpu, cuda, or auto")
     ap.add_argument("--log-interval", type=int, default=10)
     ap.add_argument("--eval-interval", type=int, default=100)
     ap.add_argument("--eval-batches", type=int, default=32)
     ap.add_argument("--seed", type=int, default=1337)
     ap.add_argument("--resume", default=None)
+    ap.add_argument("--result-json", default=None)
     ap.add_argument("--smoke", action="store_true")
     args = ap.parse_args()
 
@@ -126,16 +187,47 @@ def main():
         rank=args.rank,
         top_k=args.top_k,
         shared_hidden=args.shared_hidden,
+        moe_position=args.moe_position,
+        use_shared=not args.no_shared,
+        pair_matrix=args.pair_matrix,
+        pair_symmetric=not args.pair_asymmetric,
+        ffn_hidden=args.ffn_hidden,
     )
     print(f"params={count_params(model):,}")
-    device = torch.device("cpu")
+    if args.device == "auto":
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    else:
+        device = torch.device(args.device)
+    print(f"device={device}")
     model.to(device)
-    opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+
+    prior = None
+    if args.prior != "none":
+        print(f"building {args.prior} prior over {args.prior_tokens:,} tokens")
+        prior = NGramPrior.from_tokens(
+            train_arr,
+            order=1 if args.prior == "unigram" else 2,
+            vocab_size=vocab_size,
+            max_tokens=args.prior_tokens,
+        )
+    gate = None
+    if args.context_gate:
+        gate = ContextGate(n_sources=2, hidden=args.gate_hidden, extra_features=1).to(device)
+        print(f"context gate params={count_params(gate):,}")
+
+    retriever = build_retriever(args.retrieval, train_arr, vocab_size, args.retrieval_tokens)
+    if retriever is not None:
+        print(f"retrieval={args.retrieval}")
+
+    params = list(model.parameters()) + (list(gate.parameters()) if gate is not None else [])
+    opt = torch.optim.AdamW(params, lr=args.lr, weight_decay=args.weight_decay)
 
     start_step = 0
     if args.resume:
         ck = torch.load(args.resume, map_location=device)
         model.load_state_dict(ck["model"])
+        if gate is not None and "gate" in ck:
+            gate.load_state_dict(ck["gate"])
         if "opt" in ck:
             opt.load_state_dict(ck["opt"])
         start_step = ck.get("step", 0)
@@ -161,15 +253,33 @@ def main():
         for _ in range(args.grad_accum):
             x, y = get_batch(train_arr, args.batch_size, args.seq_len, device)
             logits, aux = model(x)
-            ce = F.cross_entropy(logits.reshape(-1, vocab_size), y.reshape(-1))
-            loss = ce + args.aux_weight * aux
+            flat_logits = logits.reshape(-1, vocab_size)
+            flat_y = y.reshape(-1)
+            if prior is not None:
+                pl = prior.logits(x.reshape(-1)).to(device)
+                extra = torch.linspace(0, 1, flat_logits.shape[0], device=device)[:, None]
+                mixed, _ = mixture_logits(flat_logits, pl, gate, args.prior_weight, extra=extra)
+                ce = F.cross_entropy(mixed, flat_y)
+            else:
+                ce = F.cross_entropy(flat_logits, flat_y)
+            pair_reg = 0.0
+            for m in model.modules():
+                if hasattr(m, "pair_reg"):
+                    pair_reg = pair_reg + m.pair_reg
+            loss = ce + args.aux_weight * aux + args.pair_reg * pair_reg
             (loss / args.grad_accum).backward()
             loss_val += float(ce.detach())
-            aux_val += float(aux.detach())
-            byte_count += float(bpt[y.reshape(-1)].sum())
-            tok_count += y.numel()
+            aux_val += float(aux.detach()) if torch.is_tensor(aux) else float(aux)
+            byte_count += float(bpt[flat_y].sum())
+            tok_count += flat_y.numel()
         torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
         opt.step()
+        if (
+            isinstance(retriever, KNNRetriever)
+            and retriever.keys is None
+            and step >= args.retrieval_build_step
+        ):
+            build_knn(retriever, model, train_arr, args.seq_len, device, args.retrieval_items)
 
         if step % args.log_interval == 0 or step == args.steps - 1:
             bpc = (loss_val / args.grad_accum) / math.log(2) / (byte_count / tok_count)
@@ -180,13 +290,15 @@ def main():
                 f"{tok_count*args.grad_accum/dt:.0f} tok/s"
             )
         if args.eval_interval and (step + 1) % args.eval_interval == 0:
-            ev = evaluate(model, valid_arr, bpt, args.seq_len, args.batch_size, device, args.eval_batches)
+            ev = evaluate(model, valid_arr, bpt, args.seq_len, args.batch_size, device, args.eval_batches,
+                          prior, gate, args.prior_weight, retriever, args.retrieval_weight, args.retrieval_order)
             print(
                 f"  eval step {step+1}: bpc={ev['bpc']:.4f} nats/tok={ev['nats_per_token']:.4f} "
                 f"ppl={ev['ppl']:.2f} bytes/tok={ev['bytes_per_token']:.3f}"
             )
             ck = {
                 "model": model.state_dict(),
+                "gate": gate.state_dict() if gate is not None else None,
                 "opt": opt.state_dict(),
                 "step": step + 1,
                 "config": vars(args),
@@ -195,10 +307,12 @@ def main():
             }
             torch.save(ck, os.path.join(args.out, "last.pt"))
 
-    ev = evaluate(model, valid_arr, bpt, args.seq_len, args.batch_size, device, args.eval_batches)
+    ev = evaluate(model, valid_arr, bpt, args.seq_len, args.batch_size, device, args.eval_batches,
+                  prior, gate, args.prior_weight, retriever, args.retrieval_weight, args.retrieval_order)
     print(f"final eval: {ev}")
     ck = {
         "model": model.state_dict(),
+        "gate": gate.state_dict() if gate is not None else None,
         "opt": opt.state_dict(),
         "step": args.steps,
         "config": vars(args),
@@ -206,6 +320,17 @@ def main():
         "eval": ev,
     }
     torch.save(ck, os.path.join(args.out, "last.pt"))
+    if args.result_json:
+        import json as _json
+        _json.dump(
+            {
+                "eval": ev,
+                "params": count_params(model),
+                "config": vars(args),
+            },
+            open(args.result_json, "w"),
+            indent=1,
+        )
     print(f"saved {args.out}/last.pt")
 
 

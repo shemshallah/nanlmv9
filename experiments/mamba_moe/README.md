@@ -151,7 +151,90 @@ python3 train.py --smoke --data-dir ~/nanlm-data/tok32k_mixed \
 bpc = sum(NLL) / ln(2) / sum(bytes(target_token))
 ```
 
-## 5. Measured prototype limits
+## 5. Ablation framework
+
+`ablate.py` runs the architecture matrix and writes `ablation.json`:
+
+```sh
+# phone-sized shape smoke
+python3 ablate.py --quick --configs none bottom ffn both ffn_pair \
+  ffn_pair_noshared prior_gate retrieval_mm retrieval_suffix retrieval_knn
+
+# GPU / Kaggle smoke
+python3 ablate.py --data-dir data/tok32k --out ablations \
+  --configs none bottom ffn both ffn_pair ffn_pair_noshared \
+    ffn_pair_d128 ffn_pair_d256 ffn_pair_d512 \
+    prior_gate retrieval_mm retrieval_suffix retrieval_knn \
+  --steps 20 --batch 8 --seq-len 128 --d-model 128 --layers 2 \
+  --experts 64 --rank 8 --shared-hidden 256 --device cuda
+```
+
+Configs cover:
+
+| config | tests |
+|---|---|
+| `none` | dense FFN baseline |
+| `bottom` | MoE only on the embedding |
+| `ffn` | MoE FFN in every SSM block |
+| `both` | bottom + block-level MoE |
+| `ffn_pair` | block-level MoE + E×E pair matrix |
+| `ffn_pair_noshared` | removes the dense shared expert |
+| `ffn_pair_d128/d256/d512` | width sweep |
+| `prior_gate` | n-gram prior + neural context gate (CM-residual proxy) |
+| `retrieval_mm` | multi-match hash retrieval |
+| `retrieval_suffix` | suffix-array backend (falls back to multi-match if `pydivsufsort` is absent) |
+| `retrieval_knn` | kNN over SSM hidden states |
+| `hier_word` | word-tokenizer run (skipped unless `--word-data-dir` exists) |
+
+### Expert pair matrix
+
+`LowRankMoE` integrates an E×E matrix as a mean-field pair adjustment:
+
+```
+p = softmax(router_logits)
+pair = p @ B                 # B is E x E (symmetrized for C(256,2))
+logits = router_logits + softplus(pair_scale) * pair
+```
+
+Every expert’s score is adjusted by its expected compatibility with the
+current expert distribution, using the full matrix, differentiably.  For 256
+experts this is exactly the **65,536 = 32³+32³** ordered-pair space; symmetrizing
+reduces it to the C(256,2) semantics.
+
+### Retrieval
+
+- `MultiMatchIndex`: hash of the last 4 tokens → up to 8 training positions;
+  counts the next token across candidates.
+- `SuffixArrayRetriever`: optional `pydivsufsort` suffix array over the token
+  byte stream; falls back to multi-match.
+- `KNNRetriever`: kNN over the model’s SSM hidden states; built after a few
+  training steps.
+
+Retrieval is causal and only mixed in at evaluation (`logits + w_ret * log
+P_ret`), so it is a clean ablation.
+
+### CM residual / context weights
+
+`hybrid.py` provides:
+
+- `NGramPrior` — unigram/bigram prior with the same interface a v9 CM prior
+  would expose.
+- `ContextGate` — a small MLP that takes source confidence/entropy plus a
+  position feature and learns per-position mixture weights.
+- `mixture_logits` — residual mixing (`nn + w*prior`) or learned convex mixing.
+
+This is the fast proxy for “train the neural side of the CM residual” and
+“neural context weights for CM”; swapping the n-gram prior for v9 logits is the
+next integration step.
+
+### Kaggle smoke
+
+`kaggle/` contains a private GPU notebook that clones the repo, downloads wt2,
+builds the 32k tokenizer, and runs the full ablation matrix for 20 steps per
+config (a few minutes on a T4).  It is a shape/step smoke, not a converged
+model.
+
+## 6. Measured prototype limits
 
 The model and tokenizer run on Termux, but CPU training is the bottleneck:
 
@@ -173,7 +256,7 @@ not a Termux training run.  The CPU path is still useful for:
 - small overfit/debug runs
 - CM-sidecar inference and mixing
 
-## 6. Hybrid with v9 CM
+## 7. Hybrid with v9 CM
 
 The intended production shape is:
 
@@ -188,7 +271,7 @@ The token-level neural distribution can be converted to exact byte
 probabilities with a token trie, or the neural model can be trained directly on
 bytes.
 
-## 7. What to scale
+## 8. What to scale
 
 - 100M–300M parameters on 10B–30B tokens is the first serious target.
 - 1B parameters on ~100B tokens is the first frontier-relevant run.
