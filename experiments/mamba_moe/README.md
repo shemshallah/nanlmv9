@@ -265,6 +265,23 @@ not a Termux training run.  The CPU path is still useful for:
 - small overfit/debug runs
 - CM-sidecar inference and mixing
 
+### Expanded v9 CM context set
+
+`v9/nancm_ctx.c` is an experimental 22-context binary (14 stable + 8 extra:
+case-folded word prefix, word suffix, sparse c1/c3, sparse c2/c4, line
+position, previous-word+length, indirect byte, record distance).
+
+Full train on Shakespeare + wt2_train, `-tshift 3`, 8×4k valid windows:
+
+| context set | frozen bpc | online bpc | wall |
+|---|---:|---:|---:|
+| 14 stable | 1.5902 | 1.5202 | 4m59 |
+| 22 expanded | 1.5983 | **1.5128** | 7m07 |
+
+The extra contexts trade a slight frozen regression for a slight online gain
+and 42% more compute.  They are **not promoted** to the stable core yet; the
+context sweep continues until a set is unambiguously better.
+
 ### Real CM prior residual smoke
 
 `cm_residual_smoke.py` dumps a real v9 CM top-k byte prior, runs the token model
