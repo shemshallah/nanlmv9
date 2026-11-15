@@ -328,15 +328,18 @@ is queued behind Kaggle's GPU scheduler.
   FFN MoE + bottom/top sandwich + pair matrices + 256 mirror points,
   local context 4.
 
-Five-minute wall-clock smokes (not converged):
+Wall-clock smokes (not converged):
 
-| preset | device | params | steps | eval bpc | eval bytes |
-|---|---|---:|---:|---:|---:|
-| 10M | CPU (Kaggle) | 11.56M | 200 | 2.6189 | 128 |
-| 100M | T4 GPU | 112.92M | 330 | 2.2559 | 512 |
+| preset | device | params | steps | wall | eval bpc | eval bytes |
+|---|---|---:|---:|---:|---:|---:|
+| 10M | CPU (Kaggle) | 11.56M | 1,013 | 330 s budget | 2.1991 | 128 |
+| 10M | T4 GPU | 11.56M | 5,274 | 600 s budget | **1.8904** | 256 |
+| 100M | T4 GPU | 112.92M | 694 | 600 s budget | **2.0608** | 512 |
 
-The 100M run used `--amp` bf16 autocast, TF32 matmuls, and the vectorized
-low-rank expert path.  These are shape/optimization smokes, not quality claims.
+The GPU runs used `--amp` bf16 autocast, TF32 matmuls, and the vectorized
+low-rank expert path.  The 100M preset uses the full bottom/top sandwich with
+two 256×256 pair matrices and 256 mirror points.  These are shape/optimization
+smokes, not quality claims.
 
 - CPU kernel: https://www.kaggle.com/code/shem42/nanlmv9-10m-cpu-smoke
 - 100M GPU kernel: https://www.kaggle.com/code/shem42/nanlmv9-100m-gpu-smoke
