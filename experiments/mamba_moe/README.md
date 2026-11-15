@@ -103,6 +103,10 @@ Measured tokenization:
 | wt2 valid | 304,363 | 1,121,681 | 3.685 |
 | wt2 test | 349,143 | 1,256,449 | 3.599 |
 
+On wt2 valid, whole-word tokens cover 55.0% of tokens and 85.0% of bytes;
+BPE pieces cover 5.4% of tokens and 4.3% of bytes; raw-byte fallback covers
+39.5% of tokens but only 10.7% of bytes (mostly spaces, newlines, punctuation).
+
 Commands:
 
 ```sh
@@ -157,6 +161,8 @@ The model and tokenizer run on Termux, but CPU training is the bottleneck:
 - smoke config (2.16M params): forward/backward works
 - benchmark config (4.35M params, 32 experts, seq 64, batch 4): **19–144 tok/s**
   depending on system load
+- a 50-step sanity run reached **4.66 bpc** on a 512-token valid sample; this
+  is not a converged model, it only proves the train/eval path
 - at ~28 tok/s, one epoch over 47M tokens is ~19 days on this phone
 
 The full 256-expert model is larger and slower.  This is a GPU/cloud experiment,
