@@ -115,7 +115,7 @@ class SuffixArrayRetriever:
         raw = self.arr.tobytes()
         unit = 2
         for row in range(n):
-            pat = contexts[row].numpy().astype(np.uint16).tobytes()
+            pat = contexts[row].detach().cpu().numpy().astype(np.uint16).tobytes()
             lo, hi = 0, len(self.sa)
             while lo < hi:
                 mid = (lo + hi) // 2
