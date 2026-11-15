@@ -72,6 +72,8 @@ def build_cmd(name, cfg, args):
         cmd.append("--context-gate")
     if cfg.get("retrieval"):
         cmd += ["--retrieval", cfg["retrieval"], "--retrieval-weight", str(args.retrieval_weight)]
+        if cfg["retrieval"] == "knn":
+            cmd += ["--retrieval-build-step", "0"]
     return cmd
 
 

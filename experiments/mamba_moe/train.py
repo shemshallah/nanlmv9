@@ -218,6 +218,8 @@ def main():
     retriever = build_retriever(args.retrieval, train_arr, vocab_size, args.retrieval_tokens)
     if retriever is not None:
         print(f"retrieval={args.retrieval}")
+    if isinstance(retriever, KNNRetriever) and args.retrieval_build_step <= 0:
+        build_knn(retriever, model, train_arr, args.seq_len, device, args.retrieval_items)
 
     params = list(model.parameters()) + (list(gate.parameters()) if gate is not None else [])
     opt = torch.optim.AdamW(params, lr=args.lr, weight_decay=args.weight_decay)

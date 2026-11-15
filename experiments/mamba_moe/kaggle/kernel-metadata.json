@@ -1,14 +1,14 @@
 {
-  "id": "shem42/nanlmv9-mamba-moe-smoke",
-  "title": "nanlmv9 Mamba/MoE ablation smoke",
-  "code_file": "kaggle_smoke.ipynb",
-  "language": "python",
-  "kernel_type": "notebook",
-  "is_private": true,
-  "enable_gpu": true,
-  "enable_internet": true,
-  "dataset_sources": [],
-  "competition_sources": [],
-  "kernel_sources": [],
-  "model_sources": []
+ "id": "shem42/nanlmv9-mamba-moe-ablation-smoke",
+ "title": "nanlmv9 Mamba MoE ablation smoke",
+ "code_file": "kaggle_smoke.ipynb",
+ "language": "python",
+ "kernel_type": "notebook",
+ "is_private": true,
+ "enable_gpu": true,
+ "enable_internet": true,
+ "dataset_sources": [],
+ "competition_sources": [],
+ "kernel_sources": [],
+ "model_sources": []
 }
