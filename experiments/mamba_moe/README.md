@@ -197,9 +197,16 @@ logits = router_logits + softplus(pair_scale) * pair
 ```
 
 Every expert’s score is adjusted by its expected compatibility with the
-current expert distribution, using the full matrix, differentiably.  For 256
-experts this is exactly the **65,536 = 32³+32³** ordered-pair space; symmetrizing
-reduces it to the C(256,2) semantics.
+current expert distribution, using the full matrix, differentiably.  The same
+matrix also gates the selected expert mixture:
+
+```
+gate = sigmoid(pair_mix_scale * B[e_i, e_j])
+topv *= gate; renormalize
+```
+
+For 256 experts the routing matrix is exactly the **65,536 = 32³+32³**
+ordered-pair space; symmetrizing reduces it to the C(256,2) semantics.
 
 ### Retrieval
 
