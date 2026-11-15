@@ -61,10 +61,13 @@ python3 v9/run_v9.py dev --evalonly \
 
 ## Hybrid experiments
 
-`experiments/mamba_moe/` contains the 32k word+BPE tokenizer, a 256-expert
-low-rank MoE + selective-SSM prototype, and the NaNROUTER data pipeline.  It
-documents the 256-register / 32³+32³ pair-space design, the SSM recurrence, and
-the measured CPU limits (the full neural run needs a GPU).
+`experiments/mamba_moe/` contains the 32k word+BPE tokenizer, exact
+token→byte layer, a 256-expert low-rank MoE + selective-SSM prototype, real v9
+CM prior dumps and residual gating, retrieval backends, the bottom/top
+256-pair "sandwich" with mirror points, and the NaNROUTER data pipeline.
+It documents the 256-register / 32³+32³ pair-space design, the SSM recurrence,
+and the measured CPU/GPU limits.  `TODO.md` tracks the remaining context-set
+and longer-run work.
 
 ## Quick start
 
