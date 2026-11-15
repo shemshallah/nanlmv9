@@ -218,6 +218,10 @@ def build_retriever(name, tokens, vocab_size, max_tokens=500_000):
         r = MultiOrderRetriever(vocab_size=vocab_size)
         r.build(tokens, max_tokens=max_tokens)
         return r
+    if name == "multimatch_multi8":
+        r = MultiOrderRetriever(orders=(2, 4, 6, 8), vocab_size=vocab_size)
+        r.build(tokens, max_tokens=max_tokens)
+        return r
     if name == "suffix":
         r = SuffixArrayRetriever(vocab_size=vocab_size)
         r.build(tokens, max_tokens=max_tokens)

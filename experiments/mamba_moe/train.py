@@ -150,7 +150,7 @@ def main():
     ap.add_argument("--context-gate", action="store_true", help="learn neural mixture weights for prior/neural")
     ap.add_argument("--gate-hidden", type=int, default=64)
     ap.add_argument("--pair-reg", type=float, default=1e-4)
-    ap.add_argument("--retrieval", choices=("none", "multimatch", "multimatch_multi", "suffix", "knn"), default="none")
+    ap.add_argument("--retrieval", choices=("none", "multimatch", "multimatch_multi", "multimatch_multi8", "suffix", "knn"), default="none")
     ap.add_argument("--retrieval-tokens", type=int, default=500_000)
     ap.add_argument("--retrieval-items", type=int, default=50_000)
     ap.add_argument("--retrieval-weight", type=float, default=0.5)
