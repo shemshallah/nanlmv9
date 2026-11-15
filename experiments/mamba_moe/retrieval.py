@@ -130,6 +130,9 @@ class SuffixArrayRetriever:
                 p = int(self.sa[j])
                 if raw[p : p + len(pat)] != pat:
                     break
+                if p % unit:
+                    j += 1
+                    continue
                 tok_pos = p // unit + order
                 if tok_pos < len(self.arr):
                     counts[int(self.arr[tok_pos])] += 1

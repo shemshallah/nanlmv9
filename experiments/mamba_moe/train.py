@@ -48,6 +48,7 @@ def retrieval_contexts(x, order):
 def evaluate(model, arr, bpt, seq, batch, device, max_batches=None, prior=None, gate=None,
              prior_weight=1.0, retriever=None, retrieval_weight=0.5, retrieval_order=4):
     model.eval()
+    bpt = bpt.to(device)
     ce_sum = 0.0
     byte_sum = 0.0
     tok_sum = 0
@@ -200,6 +201,7 @@ def main():
         device = torch.device(args.device)
     print(f"device={device}")
     model.to(device)
+    bpt = bpt.to(device)
 
     prior = None
     if args.prior != "none":
