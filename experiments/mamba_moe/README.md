@@ -298,8 +298,10 @@ these absolute bpc values with the v9 1.49 result.
 | ffn_pair_d128 | 4.75M | 4.5940 |
 | ffn_pair_d256 | 9.90M | 4.5235 |
 | ffn_pair_d512 | 21.4M | **4.3371** |
-| prior_gate (unigram) | 4.75M | **2.9536** |
-| retrieval_mm | 4.75M | **3.7847** |
+| prior_gate (unigram) | 4.75M | **2.9514** |
+| retrieval_mm | 4.75M | **3.7845** |
+| retrieval_suffix | 4.75M | 4.3451 |
+| retrieval_knn | 4.75M | 3.8380 |
 | hier_word tokenizer | 4.75M | 6.5101 |
 
 Interpretation:
@@ -309,8 +311,7 @@ Interpretation:
 - the pair matrix is neutral at 20 steps; it needs a longer run;
 - the prior/gate and retrieval paths are wired correctly and give the
   expected large smoke-time gains;
-- suffix/kNN failed in this version due to CUDA tensor-placement bugs; both are
-  fixed and re-run in the next version.
+- suffix/kNN were fixed and re-run: suffix 4.3451, kNN 3.8380 at 20 steps.
 
 A later **CPU Kaggle smoke** (2 steps, tiny model) validates every backend with
 the fixes: `retrieval_knn` 3.604, `retrieval_multi` 3.889, `retrieval_mm` 3.918,
