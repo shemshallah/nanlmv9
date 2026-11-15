@@ -298,9 +298,9 @@ Interpretation:
 
 A later **CPU Kaggle smoke** (2 steps, tiny model) validates every backend with
 the fixes: `retrieval_knn` 3.604, `retrieval_multi` 3.889, `retrieval_mm` 3.918,
-`suffix` 4.454, `prior_gate` 3.979 bpc.  These are wiring checks, not converged
-quality comparisons.  The GPU version of the same matrix is queued behind
-Kaggle's GPU scheduler.
+`suffix` 4.454, `prior_gate` 3.979, `local_ctx` 4.597 bpc.  These are wiring
+checks, not converged quality comparisons.  The GPU version of the same matrix
+is queued behind Kaggle's GPU scheduler.
 
 ## 8. Hybrid with v9 CM
 
