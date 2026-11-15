@@ -21,8 +21,15 @@ WikiText-2 train, evaluate 40 held-out WikiText-2 valid windows
 
 These numbers are the target for development releases.  The CI default
 `-tshift 2` uses smaller hash tables so the published checkpoint stays a
-reasonable size; dispatch the workflow with `tshift=-1` to reproduce the exact
-reference configuration.
+reasonable size; its expected dev result is:
+
+| `-tshift` | valid40 frozen bpc | checkpoint |
+|---|---:|---:|
+| `-1` (reference) | 1.5962 | largest (~1.6 GiB RAM) |
+| `2` (CI default) | 1.6493 | ~273 MiB |
+
+Dispatch the workflow with `tshift=-1` to reproduce the exact reference
+configuration (expect a much larger checkpoint and slower upload).
 
 ## Quick start
 

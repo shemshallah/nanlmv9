@@ -260,11 +260,17 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload workflow artifact (backup)
+      - name: Upload workflow artifact (metadata backup)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: nanlmv9-dev-${{ steps.cfg.outputs.short }}
-          path: release/
+          path: |
+            release/*.json
+            release/*.log
+            release/*.md
+            release/*.txt
+            release/*.tar.gz
+            release/SHA256SUMS
           if-no-files-found: warn
           retention-days: 14
