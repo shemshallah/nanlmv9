@@ -256,7 +256,38 @@ not a Termux training run.  The CPU path is still useful for:
 - small overfit/debug runs
 - CM-sidecar inference and mixing
 
-## 7. Hybrid with v9 CM
+## 7. Kaggle 20-step GPU smoke results
+
+These are **20-step shape/step smokes**, not converged models.  They exist to
+validate every architecture variant and to catch wiring bugs.  Do not compare
+these absolute bpc values with the v9 1.49 result.
+
+| config | params | bpc |
+|---|---:|---:|
+| none | 4.59M | 4.5167 |
+| bottom | 4.80M | 4.5216 |
+| ffn | 4.74M | 4.5943 |
+| both | 4.94M | 4.6091 |
+| ffn_pair | 4.75M | 4.5940 |
+| ffn_pair_noshared | 4.62M | 4.6417 |
+| ffn_pair_d128 | 4.75M | 4.5940 |
+| ffn_pair_d256 | 9.90M | 4.5235 |
+| ffn_pair_d512 | 21.4M | **4.3371** |
+| prior_gate (unigram) | 4.75M | **2.9536** |
+| retrieval_mm | 4.75M | **3.7847** |
+| hier_word tokenizer | 4.75M | 6.5101 |
+
+Interpretation:
+
+- width helps immediately (d512 > d256 > d128);
+- the shared expert helps (`ffn_pair` < `ffn_pair_noshared`);
+- the pair matrix is neutral at 20 steps; it needs a longer run;
+- the prior/gate and retrieval paths are wired correctly and give the
+  expected large smoke-time gains;
+- suffix/kNN failed in this version due to CUDA tensor-placement bugs; both are
+  fixed and re-run in the next version.
+
+## 8. Hybrid with v9 CM
 
 The intended production shape is:
 
@@ -271,7 +302,7 @@ The token-level neural distribution can be converted to exact byte
 probabilities with a token trie, or the neural model can be trained directly on
 bytes.
 
-## 8. What to scale
+## 9. What to scale
 
 - 100M–300M parameters on 10B–30B tokens is the first serious target.
 - 1B parameters on ~100B tokens is the first frontier-relevant run.
