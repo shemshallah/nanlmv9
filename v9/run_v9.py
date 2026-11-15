@@ -99,6 +99,9 @@ def main(
     evalonly=False,
     nancm=None,
     extra=(),
+    windows="v9",
+    evmatch=False,
+    evcarry=False,
 ):
     if mode not in ("dev", "final"):
         raise SystemExit(f"unknown mode {mode!r} (use dev or final)")
@@ -111,17 +114,23 @@ def main(
 
     if mode == "dev":
         train = [f"{C}/tinyshakespeare.txt", f"{C}/wt2_train.txt"]
-        evals = {"valid40": f"{HERE}/win_valid40.bin"}
+        if windows == "4k":
+            evals = {"valid64_4k": f"{HERE}/win_valid64_4k.bin"}
+        else:
+            evals = {"valid40": f"{HERE}/win_valid40.bin"}
     else:
         train = [
             f"{C}/tinyshakespeare.txt",
             f"{C}/wt2_train.txt",
             f"{C}/wt2_valid.txt",
         ]
-        evals = {
-            "test10": f"{HERE}/win_test10.bin",
-            "test40": f"{HERE}/win_test40.bin",
-        }
+        if windows == "4k":
+            evals = {"test64_4k": f"{HERE}/win_test64_4k.bin"}
+        else:
+            evals = {
+                "test10": f"{HERE}/win_test10.bin",
+                "test40": f"{HERE}/win_test40.bin",
+            }
 
     for p in ([] if evalonly else train):
         if not os.path.exists(p):
@@ -140,6 +149,9 @@ def main(
             "load": load,
             "save": save,
             "maxb": maxb,
+            "windows": windows,
+            "evmatch": evmatch,
+            "evcarry": evcarry,
         },
     }
     for name, wf in evals.items():
@@ -158,6 +170,10 @@ def main(
             cmd += ["-save", os.path.abspath(save)]
         if maxb:
             cmd += ["-maxb", str(maxb)]
+        if evmatch:
+            cmd += ["-evmatch"]
+        if evcarry:
+            cmd += ["-evcarry"]
         cmd += list(extra)
         if not evalonly:
             cmd += train
@@ -214,6 +230,9 @@ if __name__ == "__main__":
         ap.add_argument("--tag", default=None)
         ap.add_argument("--evalonly", action="store_true", help="skip training files")
         ap.add_argument("--nancm", default=None)
+        ap.add_argument("--windows", choices=("v9", "4k"), default="v9")
+        ap.add_argument("--evmatch", action="store_true", help="match model may use training history")
+        ap.add_argument("--evcarry", action="store_true", help="carry byte state across online windows")
         args, extra = ap.parse_known_args()
         main(
             mode=args.mode,
@@ -227,4 +246,7 @@ if __name__ == "__main__":
             evalonly=args.evalonly,
             nancm=args.nancm,
             extra=extra,
+            windows=args.windows,
+            evmatch=args.evmatch,
+            evcarry=args.evcarry,
         )

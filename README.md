@@ -31,6 +31,41 @@ reasonable size; its expected dev result is:
 Dispatch the workflow with `tshift=-1` to reproduce the exact reference
 configuration (expect a much larger checkpoint and slower upload).
 
+## Match-history evaluation (new)
+
+The original eval reset `mm_floor = histlen` at every window, so the match
+model could never reach the training corpus.  `-evmatch` allows training-history
+matches (frozen eval restores the match tables per window to prevent
+cross-window leakage), and `-evcarry` carries byte context across online
+windows.
+
+Measured on the CI checkpoint (`-tshift 2`) with 64 × 4,096-byte windows
+(229,376 scored bytes):
+
+| eval | old | `-evmatch -evcarry` | gain |
+|---|---:|---:|---:|
+| wt2 valid, frozen | 1.5967 | **1.5697** | 0.0270 |
+| wt2 valid, online | 1.5049 | **1.4948** | 0.0101 |
+| wt2 test, frozen | — | **1.5589** | — |
+| wt2 test, online | — | **1.4907** | — |
+
+For reference on the same valid split: gzip-9 = 2.66 bpc, zstd-19 = 2.20 bpc,
+xz-9e = 2.18 bpc.
+
+```sh
+# 4k windows + match-history/online-carry evaluation
+python3 v9/run_v9.py dev --evalonly \
+  --load out/nanlmv9-weights.ckpt --windows 4k \
+  --evmatch --evcarry --out out/eval4k --tag eval4k
+```
+
+## Hybrid experiments
+
+`experiments/mamba_moe/` contains the 32k word+BPE tokenizer, a 256-expert
+low-rank MoE + selective-SSM prototype, and the NaNROUTER data pipeline.  It
+documents the 256-register / 32³+32³ pair-space design, the SSM recurrence, and
+the measured CPU limits (the full neural run needs a GPU).
+
 ## Quick start
 
 ```sh
@@ -102,6 +137,7 @@ v9/bpe.py           reference BPE trainer/encoder
 v9/bpe_merges.txt   frozen 2,000-merge BPE table
 v9/run_v9.py        train/eval harness and scorer
 v9/win_*.bin        frozen evaluation windows
+experiments/mamba_moe/  32k tokenizer + 256-expert MoE/SSM prototype
 scripts/            corpora fetch, BPE parity check, release pruning
 .github/workflows/  dev release + manual prune
 ```

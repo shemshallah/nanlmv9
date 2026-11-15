@@ -169,7 +169,8 @@ jobs:
             v9/Makefile v9/nancm.c v9/bpe.py v9/bpe_merges.txt v9/mkwin.py \
             v9/run_v9.py v9/metrics_v9_dev.json \
             v9/win_valid40.bin v9/win_test10.bin v9/win_test40.bin \
-            scripts .github/workflows
+            v9/win_valid64_4k.bin v9/win_test64_4k.bin \
+            experiments scripts .github/workflows
 
           python3 - "$TAG" "$TSHIFT" "$COMMIT" "$SHORT" "$PUBLISH" <<'PY'
           import json, os, sys

@@ -30,6 +30,7 @@ static inline int fold(int c){ return (c>='A'&&c<='Z')?c+32:c; }
 
 // ---------- BPE (same table as bpe.py) ----------
 static u16 *pr = NULL; static int nmerge = 0; static int use_sub = 1;
+static int ev_match_hist = 0, ev_carry = 0;
 static int bpe_load(const char *path){
   pr = (u16*)calloc(4096u*4096u, 2); FILE *f=fopen(path,"r"); if(!f) return -1; int a,b,r=0;
   while(fscanf(f,"%d %d",&a,&b)==2){ if(a<4096&&b<4096) pr[a*4096+b]=(u16)(r+1); r++; } fclose(f); nmerge=r; return r; }
@@ -50,7 +51,7 @@ static void mm_byte_update(BS *s,int c){
     u32 pos=histlen; // hist already has c appended
     if(pos-mm_floor>=(u32)MINLEN[j]){
       u32 hv=0; for(int k=1;k<=MINLEN[j];k++) hv=hv*0x2F0B4A27u+hist[pos-k]+1; hv=(hv^(hv>>15))*0x9E3779B1u>>(32-MHB);
-      if(s->mlen[j]==0){ u32 cand=mht[j][hv]; if(cand>mm_floor && cand<pos){ int l=0; while(l<40 && cand-1-l>=mm_floor && pos-1-l>cand-1-l && hist[cand-1-l]==hist[pos-1-l]) l++;
+      if(s->mlen[j]==0){ u32 cand=mht[j][hv]; if(cand>mm_floor && cand<pos){ int l=0; while(l<255 && cand-1-l>=mm_floor && pos-1-l>cand-1-l && hist[cand-1-l]==hist[pos-1-l]) l++;
           if(l>=MINLEN[j]){ s->mlen[j]=l; s->mptr[j]=cand; } } }
       mht[j][hv]=pos;
     }
@@ -167,9 +168,12 @@ static void dist256(float *pr256){ // full byte distribution from node predictio
 static void eval_file(const char *wpath,int online,const char *opath,double *o_nats,double *o_t1,double *o_t5,long *o_n){
   FILE *f=fopen(wpath,"rb"); if(!f){fprintf(stderr,"no windows\n");exit(1);} u32 nw,skip; fread(&nw,4,1,f); fread(&skip,4,1,f);
   FILE *fo=fopen(opath,"wb"); BS save=bs; u32 hsave=histlen; u32 fsave=mm_floor; double nats=0,t1=0,t5=0; long n=0; float pr256[256];
+  u32 *mht_save[NMM]={0}; int restore_mht = ev_match_hist && !online;
+  if(restore_mht) for(int j=0;j<NMM;j++){ size_t bytes=(size_t)1<<MHB; mht_save[j]=(u32*)malloc(bytes*4); if(!mht_save[j]){fprintf(stderr,"oom mht\n");exit(1);} memcpy(mht_save[j],mht[j],bytes*4); }
   for(u32 w=0;w<nw;w++){ u32 len; fread(&len,4,1,f); u8 *buf=(u8*)malloc(len); fread(buf,1,len,f);
     if(!online){ histlen=hsave; }
-    mm_floor=histlen; memset(&bs,0,sizeof(bs));
+    if(ev_match_hist) mm_floor=0; else mm_floor=histlen;
+    if(!online || !ev_carry) memset(&bs,0,sizeof(bs));
     for(u32 i=0;i<len;i++){ int c=buf[i]; compute_ctx(&bs);
       if(i>=skip){ dist256(pr256); float pt=pr256[c]; int rank=0; int top1=1; for(int v=0;v<256;v++) if(pr256[v]>pt) rank++; top1=(rank==0);
         Rec r; r.nll=0; r.t1=top1; r.t5=(rank<5); r.pad[0]=r.pad[1]=0;
@@ -178,8 +182,10 @@ static void eval_file(const char *wpath,int online,const char *opath,double *o_n
         nats+=r.nll; t1+=r.t1; t5+=r.t5; n++; fwrite(&r,sizeof(r),1,fo);
       } else if(online){ int c0=1; for(int bp=0;bp<8;bp++){ int bit=(c>>(7-bp))&1; predict(c0,bp,1); update(bit); c0=c0*2+bit; } }
       bs_push(&bs,c); }
+    if(restore_mht) for(int j=0;j<NMM;j++) memcpy(mht[j],mht_save[j],((size_t)1<<MHB)*4);
     free(buf); }
   fclose(f); fclose(fo);
+  if(restore_mht) for(int j=0;j<NMM;j++) free(mht_save[j]);
   if(!online){ bs=save; histlen=hsave; } mm_floor=fsave;
   *o_nats=nats/n; *o_t1=t1/n; *o_t5=t5/n; *o_n=n;
 }
@@ -291,6 +297,8 @@ int main(int argc,char **argv){
     else if(!strcmp(argv[i],"-noonline")) online_final=0;
     else if(!strcmp(argv[i],"-save")) savep=argv[++i];
     else if(!strcmp(argv[i],"-load")) loadp=argv[++i];
+    else if(!strcmp(argv[i],"-evmatch")) ev_match_hist=1;
+    else if(!strcmp(argv[i],"-evcarry")) ev_carry=1;
     else if(!strcmp(argv[i],"-evalat")){ char *s=strtok(argv[++i],","); while(s){ evalat[nea++]=atol(s); s=strtok(NULL,","); } }
     else if(!strcmp(argv[i],"-segdump")){ // segdump <merges> <file> <out>
       bpe_load(argv[i+1]); FILE *f=fopen(argv[i+2],"rb"); fseek(f,0,SEEK_END); long n=ftell(f); fseek(f,0,SEEK_SET); u8 *d=(u8*)malloc(n); fread(d,1,n,f); fclose(f);
