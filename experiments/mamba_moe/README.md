@@ -151,10 +151,13 @@ bpc = sum(NLL) / ln(2) / sum(bytes(target_token))
 
 The model and tokenizer run on Termux, but CPU training is the bottleneck:
 
+- full prototype config: **10,444,544 parameters** (32k vocab, d_model=256,
+  2 SSM layers, 256 low-rank experts)
+- measured full-config forward+backward: **~28 tokens/s** on this phone
 - smoke config (2.16M params): forward/backward works
 - benchmark config (4.35M params, 32 experts, seq 64, batch 4): **19–144 tok/s**
   depending on system load
-- at ~20 tok/s, one epoch over 47M tokens is ~27 days on this phone
+- at ~28 tok/s, one epoch over 47M tokens is ~19 days on this phone
 
 The full 256-expert model is larger and slower.  This is a GPU/cloud experiment,
 not a Termux training run.  The CPU path is still useful for:
