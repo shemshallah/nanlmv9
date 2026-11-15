@@ -69,9 +69,11 @@ class LowRankMoE(nn.Module):
             # E x E pair adjacency.  For C(256,2) semantics we symmmetrize it.
             self.pair_bias = nn.Parameter(torch.zeros(n_experts, n_experts))
             self.pair_scale = nn.Parameter(torch.tensor(0.1))
+            self.pair_mix_scale = nn.Parameter(torch.tensor(0.1))
         else:
             self.pair_bias = None
             self.pair_scale = None
+            self.pair_mix_scale = None
 
         self.aux_loss = 0.0
         self.pair_reg = 0.0
@@ -102,6 +104,21 @@ class LowRankMoE(nn.Module):
         topv, topi = torch.topk(probs, self.top_k, dim=-1)
         topv = topv / topv.sum(-1, keepdim=True).clamp_min(1e-9)
 
+        if self.pair_bias is not None and self.top_k >= 2:
+            pb = self.pair_bias
+            if self.pair_symmetric:
+                pb = 0.5 * (pb + pb.transpose(0, 1))
+            gates = []
+            for i in range(self.top_k):
+                for j in range(i + 1, self.top_k):
+                    gates.append(
+                        torch.sigmoid(self.pair_mix_scale * pb[topi[:, i], topi[:, j]])
+                    )
+            if gates:
+                gate = torch.stack(gates, dim=-1).mean(-1)
+                topv = topv * gate.unsqueeze(-1)
+                topv = topv / topv.sum(-1, keepdim=True).clamp_min(1e-9)
+
         out = self.shared(flat) if self.shared is not None else torch.zeros_like(flat)
         for e in range(self.n_experts):
             mask = topi == e
@@ -118,7 +135,7 @@ class LowRankMoE(nn.Module):
         self.aux_loss = self.n_experts * (importance * load).sum()
         if self.pair_bias is not None:
             self.pair_reg = self.pair_bias.pow(2).mean()
-        return out.reshape(b, l, d)
+        return out.view(b, l, d)
 
 
 class SelectiveSSM(nn.Module):
