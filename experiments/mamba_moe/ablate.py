@@ -31,6 +31,7 @@ CONFIGS = {
         "context_gate": True,
     },
     "retrieval_mm": {"moe_position": "ffn", "pair_matrix": True, "retrieval": "multimatch"},
+    "retrieval_multi": {"moe_position": "ffn", "pair_matrix": True, "retrieval": "multimatch_multi"},
     "retrieval_suffix": {"moe_position": "ffn", "pair_matrix": True, "retrieval": "suffix"},
     "retrieval_knn": {"moe_position": "ffn", "pair_matrix": True, "retrieval": "knn"},
     "hier_word": {"moe_position": "ffn", "pair_matrix": True, "data": "word"},
@@ -74,6 +75,8 @@ def build_cmd(name, cfg, args):
         cmd += ["--retrieval", cfg["retrieval"], "--retrieval-weight", str(args.retrieval_weight)]
         if cfg["retrieval"] == "knn":
             cmd += ["--retrieval-build-step", "0"]
+        if cfg["retrieval"] == "multimatch_multi":
+            cmd += ["--retrieval-order", "6"]
     return cmd
 
 

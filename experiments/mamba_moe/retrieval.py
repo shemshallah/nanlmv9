@@ -76,6 +76,30 @@ class MultiMatchIndex:
         return torch.from_numpy(out)
 
 
+class MultiOrderRetriever:
+    """Average several causal match orders (2/4/6 tokens)."""
+
+    def __init__(self, orders=(2, 4, 6), vocab_size=32000, max_candidates=8):
+        self.orders = tuple(orders)
+        self.indexes = [
+            MultiMatchIndex(order=o, max_candidates=max_candidates, vocab_size=vocab_size)
+            for o in self.orders
+        ]
+        self.vocab_size = vocab_size
+
+    def build(self, tokens, max_tokens=500_000):
+        for idx in self.indexes:
+            idx.build(tokens, max_tokens=max_tokens)
+
+    def logits(self, contexts):
+        # contexts has the largest order; each index uses its own suffix.
+        out = None
+        for idx in self.indexes:
+            part = idx.logits(contexts[:, -idx.order :])
+            out = part if out is None else out + part
+        return out / len(self.indexes)
+
+
 class SuffixArrayRetriever:
     """Optional suffix-array backend.
 
@@ -188,6 +212,10 @@ def build_retriever(name, tokens, vocab_size, max_tokens=500_000):
         return None
     if name == "multimatch":
         r = MultiMatchIndex(vocab_size=vocab_size)
+        r.build(tokens, max_tokens=max_tokens)
+        return r
+    if name == "multimatch_multi":
+        r = MultiOrderRetriever(vocab_size=vocab_size)
         r.build(tokens, max_tokens=max_tokens)
         return r
     if name == "suffix":
