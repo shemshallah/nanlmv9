@@ -15,7 +15,7 @@ PRESETS = {
         batch_size=2,
         seq_len=64,
         lr=3e-4,
-        steps=200,
+        steps=2000,
         scan="sequential",
         scan_chunk=16,
     ),
@@ -35,7 +35,7 @@ PRESETS = {
         seq_len=128,
         lr=2e-4,
         steps=2000,
-        scan="chunked",
+        scan="sequential",
         scan_chunk=16,
     ),
 }
