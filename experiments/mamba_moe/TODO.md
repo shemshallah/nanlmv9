@@ -63,8 +63,8 @@ only smoke-tested / needs a longer run; `[ ]` still open.
 - [x] vectorized expert matmuls
 - [x] TF32 / float32 matmul precision setup on CUDA
 - [x] 10M CPU shape smoke
-- [~] 10M CPU 5-minute Kaggle run (kernel pushed)
-- [~] 100M GPU 5-minute Kaggle run (kernel pushed; GPU scheduler queue)
+- [x] 10M CPU 5-minute Kaggle run: 11.56M params, 200 steps, bpc 2.6189
+- [x] 100M GPU 5-minute Kaggle run: 112.92M params, 330 steps, bpc 2.2559
 - [x] Kaggle CPU ablation smoke (all retrieval backends execute)
 - [x] Kaggle GPU 20-step architecture smoke (v4 results recorded)
 

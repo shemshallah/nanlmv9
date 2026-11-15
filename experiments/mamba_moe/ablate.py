@@ -25,6 +25,8 @@ CONFIGS = {
     "ffn_pair_d256": {"moe_position": "ffn", "pair_matrix": True, "d_model": 256},
     "ffn_pair_d512": {"moe_position": "ffn", "pair_matrix": True, "d_model": 512},
     "local_ctx": {"moe_position": "ffn", "pair_matrix": True, "local_context": 4},
+    "local_ctx8": {"moe_position": "ffn", "pair_matrix": True, "local_context": 8},
+    "local_ctx16": {"moe_position": "ffn", "pair_matrix": True, "local_context": 16},
     "sandwich": {"moe_position": "ffn", "pair_matrix": True, "sandwich": True},
     "prior_gate": {
         "moe_position": "ffn",

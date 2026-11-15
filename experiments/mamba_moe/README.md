@@ -318,7 +318,30 @@ the fixes: `retrieval_knn` 3.604, `retrieval_multi` 3.889, `retrieval_mm` 3.918,
 checks, not converged quality comparisons.  The GPU version of the same matrix
 is queued behind Kaggle's GPU scheduler.
 
-## 8. Hybrid with v9 CM
+## 8. 5-minute CPU/GPU presets
+
+`presets.py` defines two shape presets:
+
+- **10M CPU:** 11,559,174 params, `d_model=256`, 2 SSM layers, 256 experts,
+  bottom MoE + pair matrix, local context 4.
+- **100M GPU:** 112,919,321 params, `d_model=768`, 8 SSM layers, 128 experts,
+  FFN MoE + bottom/top sandwich + pair matrices + 256 mirror points,
+  local context 4.
+
+Five-minute wall-clock smokes (not converged):
+
+| preset | device | params | steps | eval bpc | eval bytes |
+|---|---|---:|---:|---:|---:|
+| 10M | CPU (Kaggle) | 11.56M | 200 | 2.6189 | 128 |
+| 100M | T4 GPU | 112.92M | 330 | 2.2559 | 512 |
+
+The 100M run used `--amp` bf16 autocast, TF32 matmuls, and the vectorized
+low-rank expert path.  These are shape/optimization smokes, not quality claims.
+
+- CPU kernel: https://www.kaggle.com/code/shem42/nanlmv9-10m-cpu-smoke
+- 100M GPU kernel: https://www.kaggle.com/code/shem42/nanlmv9-100m-gpu-smoke
+
+## 9. Hybrid with v9 CM
 
 The intended production shape is:
 
@@ -333,7 +356,7 @@ The token-level neural distribution can be converted to exact byte
 probabilities with a token trie, or the neural model can be trained directly on
 bytes.
 
-## 9. What to scale
+## 10. What to scale
 
 - 100M–300M parameters on 10B–30B tokens is the first serious target.
 - 1B parameters on ~100B tokens is the first frontier-relevant run.
