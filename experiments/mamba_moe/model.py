@@ -108,16 +108,16 @@ class LowRankMoE(nn.Module):
             pb = self.pair_bias
             if self.pair_symmetric:
                 pb = 0.5 * (pb + pb.transpose(0, 1))
-            gates = []
+            pair_gates = torch.ones_like(topv)
             for i in range(self.top_k):
                 for j in range(i + 1, self.top_k):
-                    gates.append(
-                        torch.sigmoid(self.pair_mix_scale * pb[topi[:, i], topi[:, j]])
+                    g = torch.sigmoid(
+                        self.pair_mix_scale * pb[topi[:, i], topi[:, j]]
                     )
-            if gates:
-                gate = torch.stack(gates, dim=-1).mean(-1)
-                topv = topv * gate.unsqueeze(-1)
-                topv = topv / topv.sum(-1, keepdim=True).clamp_min(1e-9)
+                    pair_gates[:, i] *= g
+                    pair_gates[:, j] *= 1.0 - g
+            topv = topv * pair_gates
+            topv = topv / topv.sum(-1, keepdim=True).clamp_min(1e-9)
 
         out = self.shared(flat) if self.shared is not None else torch.zeros_like(flat)
         for e in range(self.n_experts):

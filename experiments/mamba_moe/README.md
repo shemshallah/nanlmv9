@@ -201,8 +201,10 @@ current expert distribution, using the full matrix, differentiably.  The same
 matrix also gates the selected expert mixture:
 
 ```
-gate = sigmoid(pair_mix_scale * B[e_i, e_j])
-topv *= gate; renormalize
+for each selected pair i<j:
+    g = sigmoid(pair_mix_scale * B[e_i, e_j])
+    topv_i *= g; topv_j *= 1-g
+renormalize(topv)
 ```
 
 For 256 experts the routing matrix is exactly the **65,536 = 32³+32³**
