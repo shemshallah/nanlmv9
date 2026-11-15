@@ -298,6 +298,16 @@ The learned mean gate weight was **0.209 neural / 0.791 CM**, and every
 position put at least 0.389 weight on CM.  This is the real-logit version of
 the n-gram proxy; the short sample is a wiring/signal check, not a benchmark.
 
+With the larger 229,376-byte CM dump (64×4k windows) and 1,999 scored bytes:
+
+| source | bpc |
+|---|---:|
+| neural only | 3.2494 |
+| CM only | 1.9346 |
+| gated hybrid | **1.6742** |
+
+Mean gate weight: **0.243 neural / 0.757 CM**; minimum CM weight 0.208.
+
 ## 7. Kaggle 20-step GPU smoke results
 
 These are **20-step shape/step smokes**, not converged models.  They exist to
