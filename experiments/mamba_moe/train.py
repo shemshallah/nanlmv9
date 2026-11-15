@@ -125,6 +125,7 @@ def main():
     ap.add_argument("--pair-matrix", action="store_true", help="enable E x E expert-pair adjacency")
     ap.add_argument("--pair-asymmetric", action="store_true", help="do not symmetrize the pair matrix")
     ap.add_argument("--ffn-hidden", type=int, default=None)
+    ap.add_argument("--local-context", type=int, default=0)
     ap.add_argument("--prior", choices=("none", "unigram", "bigram"), default="none")
     ap.add_argument("--prior-weight", type=float, default=1.0)
     ap.add_argument("--prior-tokens", type=int, default=2_000_000)
@@ -193,6 +194,7 @@ def main():
         pair_matrix=args.pair_matrix,
         pair_symmetric=not args.pair_asymmetric,
         ffn_hidden=args.ffn_hidden,
+        local_context=args.local_context,
     )
     print(f"params={count_params(model):,}")
     if args.device == "auto":

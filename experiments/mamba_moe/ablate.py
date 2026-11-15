@@ -24,6 +24,7 @@ CONFIGS = {
     "ffn_pair_d128": {"moe_position": "ffn", "pair_matrix": True, "d_model": 128},
     "ffn_pair_d256": {"moe_position": "ffn", "pair_matrix": True, "d_model": 256},
     "ffn_pair_d512": {"moe_position": "ffn", "pair_matrix": True, "d_model": 512},
+    "local_ctx": {"moe_position": "ffn", "pair_matrix": True, "local_context": 4},
     "prior_gate": {
         "moe_position": "ffn",
         "pair_matrix": True,
@@ -69,6 +70,8 @@ def build_cmd(name, cfg, args):
         cmd.append("--no-shared")
     if cfg.get("prior"):
         cmd += ["--prior", cfg["prior"], "--prior-tokens", str(args.prior_tokens)]
+    if cfg.get("local_context"):
+        cmd += ["--local-context", str(cfg["local_context"])]
     if cfg.get("context_gate"):
         cmd.append("--context-gate")
     if cfg.get("retrieval"):

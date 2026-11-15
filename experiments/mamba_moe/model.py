@@ -252,11 +252,15 @@ class MambaMoE(nn.Module):
         pair_matrix=False,
         pair_symmetric=True,
         ffn_hidden=None,
+        local_context=0,
     ):
         super().__init__()
         self.vocab_size = vocab_size
         self.moe_position = moe_position
+        self.local_context = local_context
         self.embed = nn.Embedding(vocab_size, d_model)
+        if local_context:
+            self.local_alpha = nn.Parameter(torch.zeros(local_context))
         nn.init.normal_(self.embed.weight, std=0.02)
 
         moe_kwargs = dict(
@@ -289,8 +293,19 @@ class MambaMoE(nn.Module):
         self.head = nn.Linear(d_model, vocab_size, bias=False)
         self.head.weight = self.embed.weight
 
-    def forward(self, idx):
+    def _embed(self, idx):
         x = self.embed(idx)
+        if self.local_context:
+            b, l = idx.shape
+            for k in range(1, self.local_context + 1):
+                if k >= l:
+                    break
+                prev = torch.cat([torch.zeros(b, k, dtype=idx.dtype, device=idx.device), idx[:, :-k]], dim=1)
+                x = x + self.local_alpha[k - 1] * self.embed(prev)
+        return x
+
+    def forward(self, idx):
+        x = self._embed(idx)
         aux = 0.0
         if self.bottom_moe is not None:
             x = x + self.bottom_moe(x)
@@ -304,7 +319,7 @@ class MambaMoE(nn.Module):
 
     def encode(self, idx):
         """Hidden states before the token head, for SSM-state retrieval."""
-        x = self.embed(idx)
+        x = self._embed(idx)
         if self.bottom_moe is not None:
             x = x + self.bottom_moe(x)
         for blk in self.blocks:
