@@ -95,10 +95,12 @@ class LowRankMoE(nn.Module):
         pair = p @ b
         return logits + F.softplus(self.pair_scale) * pair
 
-    def forward(self, x):
+    def forward(self, x, router_bias=None, return_probs=False):
         b, l, d = x.shape
         flat = x.reshape(-1, d)
         logits = self.router(flat)
+        if router_bias is not None:
+            logits = logits + router_bias.reshape(logits.shape[0], -1)
         logits = self._pair_adjust(logits, flat)
         probs = F.softmax(logits, dim=-1)
         topv, topi = torch.topk(probs, self.top_k, dim=-1)
@@ -136,7 +138,10 @@ class LowRankMoE(nn.Module):
         self.aux_loss = self.n_experts * (importance * load).sum()
         if self.pair_bias is not None:
             self.pair_reg = self.pair_bias.pow(2).mean()
-        return out.view(b, l, d)
+        out = out.view(b, l, d)
+        if return_probs:
+            return out, probs.view(b, l, -1)
+        return out
 
 
 class SelectiveSSM(nn.Module):
@@ -362,6 +367,7 @@ class MambaMoE(nn.Module):
             ]
         )
         self.top_moe = LowRankMoE(d_model, **moe_kwargs) if sandwich else None
+        self.bottom_to_top = nn.Linear(n_experts, n_experts, bias=False) if sandwich else None
         self.mirror = MirrorBridge(d_model, mirror_points) if sandwich else None
         self.norm = RMSNorm(d_model)
         self.head = nn.Linear(d_model, vocab_size, bias=False)
@@ -382,8 +388,13 @@ class MambaMoE(nn.Module):
         x = self._embed(idx)
         aux = 0.0
         bottom = x
+        bottom_probs = None
         if self.bottom_moe is not None:
-            bottom = x + self.bottom_moe(x)
+            if self.sandwich:
+                bottom_out, bottom_probs = self.bottom_moe(x, return_probs=True)
+                bottom = x + bottom_out
+            else:
+                bottom = x + self.bottom_moe(x)
             x = bottom
             aux = aux + self.bottom_moe.aux_loss
         for blk in self.blocks:
@@ -391,7 +402,10 @@ class MambaMoE(nn.Module):
             if isinstance(blk.ffn, LowRankMoE):
                 aux = aux + blk.ffn.aux_loss
         if self.top_moe is not None:
-            x = x + self.top_moe(x)
+            top_bias = None
+            if bottom_probs is not None and self.bottom_to_top is not None:
+                top_bias = bottom_probs @ self.bottom_to_top.weight.T
+            x = x + self.top_moe(x, router_bias=top_bias)
             aux = aux + self.top_moe.aux_loss
         if self.mirror is not None:
             x = self.mirror(bottom, x)
@@ -402,13 +416,19 @@ class MambaMoE(nn.Module):
         """Hidden states before the token head, for SSM-state retrieval."""
         x = self._embed(idx)
         bottom = x
+        bottom_probs = None
         if self.bottom_moe is not None:
-            bottom = x + self.bottom_moe(x)
+            if self.sandwich:
+                bottom_out, bottom_probs = self.bottom_moe(x, return_probs=True)
+                bottom = x + bottom_out
+            else:
+                bottom = x + self.bottom_moe(x)
             x = bottom
         for blk in self.blocks:
             x = blk(x)
         if self.top_moe is not None:
-            x = x + self.top_moe(x)
+            top_bias = bottom_probs @ self.bottom_to_top.weight.T if bottom_probs is not None else None
+            x = x + self.top_moe(x, router_bias=top_bias)
         if self.mirror is not None:
             x = self.mirror(bottom, x)
         return self.norm(x)
