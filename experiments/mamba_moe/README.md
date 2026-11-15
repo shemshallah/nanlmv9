@@ -319,7 +319,7 @@ the fixes: `retrieval_knn` 3.604, `retrieval_multi` 3.889, `retrieval_mm` 3.918,
 checks, not converged quality comparisons.  The GPU version of the same matrix
 is queued behind Kaggle's GPU scheduler.
 
-## 8. 5-minute CPU/GPU presets
+## 8. Wall-clock CPU/GPU presets
 
 `presets.py` defines two shape presets:
 
@@ -335,6 +335,7 @@ Wall-clock smokes (not converged):
 |---|---|---:|---:|---:|---:|---:|
 | 10M | CPU (Kaggle) | 11.56M | 1,013 | 330 s budget | 2.1991 | 128 |
 | 10M | T4 GPU | 11.56M | 5,274 | 600 s budget | **1.8904** | 256 |
+| d512 | T4 GPU | 53.20M | 438 | 300 s budget | 2.1836 | 512 |
 | 100M | T4 GPU | 112.92M | 694 | 600 s budget | **2.0608** | 512 |
 
 The GPU runs used `--amp` bf16 autocast, TF32 matmuls, and the vectorized
