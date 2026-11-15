@@ -265,6 +265,22 @@ not a Termux training run.  The CPU path is still useful for:
 - small overfit/debug runs
 - CM-sidecar inference and mixing
 
+### Real CM prior residual smoke
+
+`cm_residual_smoke.py` dumps a real v9 CM top-k byte prior, runs the token model
+through the token→byte trie, and trains a `ContextGate` on the true bytes.
+First 999 bytes of a wt2 valid window:
+
+| source | bpc |
+|---|---:|
+| neural only (token→byte) | 3.5208 |
+| v9 CM only | 1.9848 |
+| gated hybrid | **1.7108** |
+
+The learned mean gate weight was **0.209 neural / 0.791 CM**, and every
+position put at least 0.389 weight on CM.  This is the real-logit version of
+the n-gram proxy; the short sample is a wiring/signal check, not a benchmark.
+
 ## 7. Kaggle 20-step GPU smoke results
 
 These are **20-step shape/step smokes**, not converged models.  They exist to

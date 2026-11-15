@@ -120,15 +120,16 @@ class LowRankMoE(nn.Module):
             topv = topv / topv.sum(-1, keepdim=True).clamp_min(1e-9)
 
         out = self.shared(flat) if self.shared is not None else torch.zeros_like(flat)
-        for e in range(self.n_experts):
-            mask = topi == e
-            if not mask.any():
-                continue
-            tok_idx, slot = mask.nonzero(as_tuple=True)
-            h = flat[tok_idx] @ self.down[e]
+        # Vectorized low-rank expert application: one batched matmul per top-k
+        # slot instead of a Python loop over all 256 experts.
+        for slot in range(self.top_k):
+            idx = topi[:, slot]
+            down = self.down[idx]       # [N, d, rank]
+            up = self.up[idx]           # [N, rank, d]
+            h = torch.bmm(flat.unsqueeze(1), down).squeeze(1)
             h = F.silu(h)
-            h = h @ self.up[e]
-            out.index_add_(0, tok_idx, h * topv[tok_idx, slot].unsqueeze(-1))
+            h = torch.bmm(h.unsqueeze(1), up).squeeze(1)
+            out = out + h * topv[:, slot : slot + 1]
 
         importance = probs.mean(0)
         load = F.one_hot(topi, self.n_experts).float().mean(dim=(0, 1))
@@ -236,6 +237,32 @@ class MambaBlock(nn.Module):
         return x
 
 
+class MirrorBridge(nn.Module):
+    """256 mirror points between the bottom concept cloud and the top MoE.
+
+    No transformer/attention: each position forms a query from bottom+top
+    features, softly assigns it to 256 learned mirror points, and adds the
+    assigned point back to the top stream.
+    """
+
+    def __init__(self, d_model, n_points=256, scale=0.1):
+        super().__init__()
+        self.points = nn.Parameter(torch.randn(n_points, d_model) / math.sqrt(d_model))
+        self.bottom_proj = nn.Linear(d_model, d_model, bias=False)
+        self.top_proj = nn.Linear(d_model, d_model, bias=False)
+        self.scale = nn.Parameter(torch.tensor(scale))
+        nn.init.normal_(self.bottom_proj.weight, std=0.02)
+        nn.init.normal_(self.top_proj.weight, std=0.02)
+        self.last_gate = None
+
+    def forward(self, bottom, top):
+        q = self.bottom_proj(bottom) + self.top_proj(top)
+        logits = q @ self.points.T / math.sqrt(q.shape[-1])
+        gate = F.softmax(logits, dim=-1)
+        self.last_gate = gate
+        return top + F.softplus(self.scale) * (gate @ self.points)
+
+
 class MambaMoE(nn.Module):
     def __init__(
         self,
@@ -253,11 +280,14 @@ class MambaMoE(nn.Module):
         pair_symmetric=True,
         ffn_hidden=None,
         local_context=0,
+        sandwich=False,
+        mirror_points=256,
     ):
         super().__init__()
         self.vocab_size = vocab_size
         self.moe_position = moe_position
         self.local_context = local_context
+        self.sandwich = sandwich
         self.embed = nn.Embedding(vocab_size, d_model)
         if local_context:
             self.local_alpha = nn.Parameter(torch.zeros(local_context))
@@ -273,7 +303,7 @@ class MambaMoE(nn.Module):
             pair_symmetric=pair_symmetric,
         )
         self.bottom_moe = None
-        if moe_position in ("bottom", "both"):
+        if moe_position in ("bottom", "both") or sandwich:
             self.bottom_moe = LowRankMoE(d_model, **moe_kwargs)
 
         ffn_mode = "moe" if moe_position in ("ffn", "both") else "dense"
@@ -289,6 +319,8 @@ class MambaMoE(nn.Module):
                 for _ in range(n_layers)
             ]
         )
+        self.top_moe = LowRankMoE(d_model, **moe_kwargs) if sandwich else None
+        self.mirror = MirrorBridge(d_model, mirror_points) if sandwich else None
         self.norm = RMSNorm(d_model)
         self.head = nn.Linear(d_model, vocab_size, bias=False)
         self.head.weight = self.embed.weight
@@ -307,23 +339,36 @@ class MambaMoE(nn.Module):
     def forward(self, idx):
         x = self._embed(idx)
         aux = 0.0
+        bottom = x
         if self.bottom_moe is not None:
-            x = x + self.bottom_moe(x)
+            bottom = x + self.bottom_moe(x)
+            x = bottom
             aux = aux + self.bottom_moe.aux_loss
         for blk in self.blocks:
             x = blk(x)
             if isinstance(blk.ffn, LowRankMoE):
                 aux = aux + blk.ffn.aux_loss
+        if self.top_moe is not None:
+            x = x + self.top_moe(x)
+            aux = aux + self.top_moe.aux_loss
+        if self.mirror is not None:
+            x = self.mirror(bottom, x)
         x = self.norm(x)
         return self.head(x), aux
 
     def encode(self, idx):
         """Hidden states before the token head, for SSM-state retrieval."""
         x = self._embed(idx)
+        bottom = x
         if self.bottom_moe is not None:
-            x = x + self.bottom_moe(x)
+            bottom = x + self.bottom_moe(x)
+            x = bottom
         for blk in self.blocks:
             x = blk(x)
+        if self.top_moe is not None:
+            x = x + self.top_moe(x)
+        if self.mirror is not None:
+            x = self.mirror(bottom, x)
         return self.norm(x)
 
 

@@ -165,6 +165,36 @@ static void dist256(float *pr256){ // full byte distribution from node predictio
   float p1[256]; for(int c0=1;c0<256;c0++){ int bp=0; int t=c0; while(t>1){t>>=1;bp++;} p1[c0]=predict(c0,bp,0); }
   for(int v=0;v<256;v++){ float pr=1.f; int c0=1; for(int b=7;b>=0;b--){ int bit=(v>>b)&1; pr*= bit?p1[c0]:(1.f-p1[c0]); c0=c0*2+bit; } pr256[v]=pr; }
 }
+static int dump_prior(const char *wpath,const char *opath,int topk){
+  if(topk<1) topk=1; if(topk>256) topk=256;
+  FILE *f=fopen(wpath,"rb"); if(!f){fprintf(stderr,"no windows\n");return -1;}
+  u32 nw,skip; fread(&nw,4,1,f); fread(&skip,4,1,f);
+  long total=0;
+  for(u32 w=0;w<nw;w++){ u32 len; fread(&len,4,1,f); fseek(f,len,SEEK_CUR); if(len>skip) total+=len-skip; }
+  fseek(f,8,SEEK_SET);
+  FILE *fo=fopen(opath,"wb"); if(!fo){fclose(f);return -1;}
+  const char magic[8]={'N','A','N','C','M','9','P','1'}; fwrite(magic,1,8,fo);
+  fwrite(&total,4,1,fo); fwrite(&topk,4,1,fo);
+  BS save=bs; u32 hsave=histlen; u32 fsave=mm_floor;
+  u32 *mht_save[NMM]={0}; int restore_mht=ev_match_hist;
+  if(restore_mht) for(int j=0;j<NMM;j++){ size_t bytes=(size_t)1<<MHB; mht_save[j]=(u32*)malloc(bytes*4); memcpy(mht_save[j],mht[j],bytes*4); }
+  float pr256[256]; u8 ids[256]; float ps[256]; u8 used[256];
+  for(u32 w=0;w<nw;w++){ u32 len; fread(&len,4,1,f); u8 *buf=(u8*)malloc(len); fread(buf,1,len,f);
+    histlen=hsave; mm_floor=ev_match_hist?0:histlen; memset(&bs,0,sizeof(bs));
+    for(u32 i=0;i<len;i++){ int c=buf[i]; compute_ctx(&bs);
+      if(i>=skip){ dist256(pr256); memset(used,0,256);
+        for(int j=0;j<topk;j++){ int bi=-1; float bp=-1; for(int v=0;v<256;v++) if(!used[v]&&pr256[v]>bp){bp=pr256[v];bi=v;} used[bi]=1; ids[j]=(u8)bi; ps[j]=bp; }
+        fwrite(&c,1,1,fo); fwrite(ids,1,topk,fo); fwrite(ps,4,topk,fo); }
+      bs_push(&bs,c); }
+    if(restore_mht) for(int j=0;j<NMM;j++) memcpy(mht[j],mht_save[j],((size_t)1<<MHB)*4);
+    free(buf); }
+  if(restore_mht) for(int j=0;j<NMM;j++) free(mht_save[j]);
+  bs=save; histlen=hsave; mm_floor=fsave;
+  fclose(f); fclose(fo);
+  fprintf(stderr,"CM prior dumped: %s (%ld bytes, top-%d)\n",opath,total,topk);
+  return 0;
+}
+
 static void eval_file(const char *wpath,int online,const char *opath,double *o_nats,double *o_t1,double *o_t5,long *o_n){
   FILE *f=fopen(wpath,"rb"); if(!f){fprintf(stderr,"no windows\n");exit(1);} u32 nw,skip; fread(&nw,4,1,f); fread(&skip,4,1,f);
   FILE *fo=fopen(opath,"wb"); BS save=bs; u32 hsave=histlen; u32 fsave=mm_floor; double nats=0,t1=0,t5=0; long n=0; float pr256[256];
@@ -284,7 +314,7 @@ static int load_checkpoint(const char *path){
 }
 
 int main(int argc,char **argv){
-  const char *evalp=NULL,*bpep=NULL,*outp="res",*savep=NULL,*loadp=NULL; int tbs=0; long evalat[32]; int nea=0; int online_final=1; char *files[16]; int nf=0; long maxb=1L<<60;
+  const char *evalp=NULL,*bpep=NULL,*outp="res",*savep=NULL,*loadp=NULL,*dumpp=NULL,*dumpinp=NULL; int dumptop=8,dumponly=0; int tbs=0; long evalat[32]; int nea=0; int online_final=1; char *files[16]; int nf=0; long maxb=1L<<60;
   for(int i=1;i<argc;i++){
     if(!strcmp(argv[i],"-eval")) evalp=argv[++i];
     else if(!strcmp(argv[i],"-bpe")) bpep=argv[++i];
@@ -295,6 +325,10 @@ int main(int argc,char **argv){
     else if(!strcmp(argv[i],"-lr2")) lr2=atof(argv[++i]);
     else if(!strcmp(argv[i],"-maxb")) maxb=atol(argv[++i]);
     else if(!strcmp(argv[i],"-noonline")) online_final=0;
+    else if(!strcmp(argv[i],"-dump")) dumpp=argv[++i];
+    else if(!strcmp(argv[i],"-dumpin")) dumpinp=argv[++i];
+    else if(!strcmp(argv[i],"-dumptop")) dumptop=atoi(argv[++i]);
+    else if(!strcmp(argv[i],"-dumponly")) dumponly=1;
     else if(!strcmp(argv[i],"-save")) savep=argv[++i];
     else if(!strcmp(argv[i],"-load")) loadp=argv[++i];
     else if(!strcmp(argv[i],"-evmatch")) ev_match_hist=1;
@@ -323,6 +357,12 @@ int main(int argc,char **argv){
           printf("EVAL frozen @%ld bytes: nats=%.4f bpc=%.4f top1=%.4f top5=%.4f n=%ld\n",total,nats,nats/log(2),t1,t5,ne); fflush(stdout);} eai++; } }
     free(d); }
   if(savep && save_checkpoint(savep)) return 1;
+  if(dumpp){
+    const char *inp=dumpinp?dumpinp:evalp;
+    if(!inp){ fprintf(stderr,"-dump needs -dumpin or -eval\n"); return 1; }
+    if(dump_prior(inp,dumpp,dumptop)) return 1;
+    if(dumponly) return 0;
+  }
   if(evalp){ char o[256]; snprintf(o,256,"%s_frozen.bin",outp); eval_file(evalp,0,o,&nats,&t1,&t5,&ne);
     printf("FINAL frozen @%ld bytes: nats=%.4f bpc=%.4f top1=%.4f top5=%.4f n=%ld\n",total,nats,nats/log(2),t1,t5,ne);
     if(online_final){ snprintf(o,256,"%s_online.bin",outp); eval_file(evalp,1,o,&nats,&t1,&t5,&ne);

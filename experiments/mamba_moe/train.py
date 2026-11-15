@@ -12,6 +12,7 @@ import torch.nn.functional as F
 
 from model import MambaMoE, count_params
 from hybrid import NGramPrior, ContextGate, mixture_logits
+from presets import PRESETS
 from retrieval import build_retriever, KNNRetriever
 
 
@@ -33,6 +34,15 @@ def get_batch(arr, bs, seq, device):
     )
 
 
+def fuse_retrieval(logits, rl, mode="add", weight=0.5):
+    if mode == "confidence":
+        ent = -(torch.softmax(logits, -1) * torch.log_softmax(logits, -1)).sum(-1)
+        conf = torch.softmax(rl, -1).max(-1).values
+        w = torch.sigmoid(2.0 * (conf - ent)) * weight
+        return logits + w[:, None] * rl
+    return logits + weight * rl
+
+
 def retrieval_contexts(x, order):
     b, l = x.shape
     ctx = torch.zeros(b, l, order, dtype=torch.long, device=x.device)
@@ -46,7 +56,8 @@ def retrieval_contexts(x, order):
 
 @torch.no_grad()
 def evaluate(model, arr, bpt, seq, batch, device, max_batches=None, prior=None, gate=None,
-             prior_weight=1.0, retriever=None, retrieval_weight=0.5, retrieval_order=4):
+             prior_weight=1.0, retriever=None, retrieval_weight=0.5, retrieval_order=4,
+             retrieval_fusion="add"):
     model.eval()
     bpt = bpt.to(device)
     ce_sum = 0.0
@@ -72,7 +83,7 @@ def evaluate(model, arr, bpt, seq, batch, device, max_batches=None, prior=None, 
                 rl = retriever.logits(h).to(device)
             else:
                 rl = retriever.logits(retrieval_contexts(x, retrieval_order)).to(device)
-            logits = logits + retrieval_weight * rl
+            logits = fuse_retrieval(logits, rl, retrieval_fusion, retrieval_weight)
         ce = F.cross_entropy(logits, y.reshape(-1), reduction="sum")
         ce_sum += float(ce)
         byte_sum += float(bpt[y.reshape(-1)].sum())
@@ -126,6 +137,8 @@ def main():
     ap.add_argument("--pair-asymmetric", action="store_true", help="do not symmetrize the pair matrix")
     ap.add_argument("--ffn-hidden", type=int, default=None)
     ap.add_argument("--local-context", type=int, default=0)
+    ap.add_argument("--sandwich", action="store_true")
+    ap.add_argument("--mirror-points", type=int, default=256)
     ap.add_argument("--prior", choices=("none", "unigram", "bigram"), default="none")
     ap.add_argument("--prior-weight", type=float, default=1.0)
     ap.add_argument("--prior-tokens", type=int, default=2_000_000)
@@ -138,6 +151,7 @@ def main():
     ap.add_argument("--retrieval-weight", type=float, default=0.5)
     ap.add_argument("--retrieval-build-step", type=int, default=1)
     ap.add_argument("--retrieval-order", type=int, default=4)
+    ap.add_argument("--retrieval-fusion", choices=("add", "confidence"), default="add")
     ap.add_argument("--lr", type=float, default=3e-4)
     ap.add_argument("--min-lr", type=float, default=3e-5)
     ap.add_argument("--warmup", type=int, default=50)
@@ -153,8 +167,23 @@ def main():
     ap.add_argument("--seed", type=int, default=1337)
     ap.add_argument("--resume", default=None)
     ap.add_argument("--result-json", default=None)
+    ap.add_argument("--preset", choices=("10m", "100m"), default=None)
+    ap.add_argument("--preset-smoke", action="store_true")
+    ap.add_argument("--max-seconds", type=float, default=None)
+    ap.add_argument("--amp", action="store_true", help="CUDA mixed precision")
     ap.add_argument("--smoke", action="store_true")
     args = ap.parse_args()
+
+    if args.preset:
+        for k, v in PRESETS[args.preset].items():
+            setattr(args, k, v)
+        print(f"preset={args.preset}")
+        if args.preset_smoke:
+            args.steps = 1
+            args.batch_size = 1
+            args.seq_len = 16
+            args.eval_interval = 1
+            args.eval_batches = 1
 
     if args.smoke:
         args.steps = min(args.steps, 3)
@@ -195,6 +224,8 @@ def main():
         pair_symmetric=not args.pair_asymmetric,
         ffn_hidden=args.ffn_hidden,
         local_context=args.local_context,
+        sandwich=args.sandwich,
+        mirror_points=args.mirror_points,
     )
     print(f"params={count_params(model):,}")
     if args.device == "auto":
@@ -202,6 +233,10 @@ def main():
     else:
         device = torch.device(args.device)
     print(f"device={device}")
+    if device.type == "cuda":
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        torch.set_float32_matmul_precision("high")
     model.to(device)
     bpt = bpt.to(device)
 
@@ -242,6 +277,9 @@ def main():
     t0 = time.time()
     model.train()
     for step in range(start_step, args.steps):
+        if args.max_seconds and (time.time() - t0) >= args.max_seconds:
+            print(f"time budget reached at step {step}")
+            break
         lr = args.lr
         if step < args.warmup:
             lr = args.lr * (step + 1) / max(1, args.warmup)
@@ -258,8 +296,9 @@ def main():
         tok_count = 0
         for _ in range(args.grad_accum):
             x, y = get_batch(train_arr, args.batch_size, args.seq_len, device)
-            logits, aux = model(x)
-            flat_logits = logits.reshape(-1, vocab_size)
+            with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=(args.amp and device.type == "cuda")):
+                logits, aux = model(x)
+            flat_logits = logits.reshape(-1, vocab_size).float()
             flat_y = y.reshape(-1)
             if prior is not None:
                 pl = prior.logits(x.reshape(-1)).to(device)
@@ -297,7 +336,7 @@ def main():
             )
         if args.eval_interval and (step + 1) % args.eval_interval == 0:
             ev = evaluate(model, valid_arr, bpt, args.seq_len, args.batch_size, device, args.eval_batches,
-                          prior, gate, args.prior_weight, retriever, args.retrieval_weight, args.retrieval_order)
+                          prior, gate, args.prior_weight, retriever, args.retrieval_weight, args.retrieval_order, args.retrieval_fusion)
             print(
                 f"  eval step {step+1}: bpc={ev['bpc']:.4f} nats/tok={ev['nats_per_token']:.4f} "
                 f"ppl={ev['ppl']:.2f} bytes/tok={ev['bytes_per_token']:.3f}"
@@ -314,7 +353,7 @@ def main():
             torch.save(ck, os.path.join(args.out, "last.pt"))
 
     ev = evaluate(model, valid_arr, bpt, args.seq_len, args.batch_size, device, args.eval_batches,
-                  prior, gate, args.prior_weight, retriever, args.retrieval_weight, args.retrieval_order)
+                  prior, gate, args.prior_weight, retriever, args.retrieval_weight, args.retrieval_order, args.retrieval_fusion)
     print(f"final eval: {ev}")
     ck = {
         "model": model.state_dict(),

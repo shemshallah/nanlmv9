@@ -1,0 +1,14 @@
+{
+  "id": "shem42/nanlmv9-10m-cpu-smoke",
+  "title": "nanlmv9 10M CPU smoke",
+  "code_file": "kaggle_10m.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": false,
+  "enable_internet": true,
+  "dataset_sources": [],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "model_sources": []
+}

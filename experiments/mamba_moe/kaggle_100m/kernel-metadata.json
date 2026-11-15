@@ -1,0 +1,14 @@
+{
+  "id": "shem42/nanlmv9-100m-gpu-smoke",
+  "title": "nanlmv9 100M GPU smoke",
+  "code_file": "kaggle_100m.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": [],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "model_sources": []
+}
