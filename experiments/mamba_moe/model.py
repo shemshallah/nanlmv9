@@ -142,13 +142,15 @@ class LowRankMoE(nn.Module):
 class SelectiveSSM(nn.Module):
     """Mamba-1-style selective scan, pure PyTorch sequential reference."""
 
-    def __init__(self, d_model, d_state=16, d_conv=4, expand=2, dt_rank=None):
+    def __init__(self, d_model, d_state=16, d_conv=4, expand=2, dt_rank=None, scan_mode="sequential", scan_chunk=16):
         super().__init__()
         self.d_model = d_model
         self.d_inner = int(expand * d_model)
         self.d_state = d_state
         self.d_conv = d_conv
         self.dt_rank = dt_rank or max(1, math.ceil(d_model / 16))
+        self.scan_mode = scan_mode
+        self.scan_chunk = scan_chunk
         self.in_proj = nn.Linear(d_model, 2 * self.d_inner, bias=False)
         self.conv = nn.Conv1d(
             self.d_inner, self.d_inner, d_conv, groups=self.d_inner, padding=d_conv - 1
@@ -185,17 +187,51 @@ class SelectiveSSM(nn.Module):
         cm = x_dbl[..., self.dt_rank + self.d_state :]
         a = -torch.exp(self.A_log)
 
-        h = x.new_zeros(b, self.d_inner, self.d_state)
-        ys = []
-        for t in range(l):
-            dt_t = dt[:, t]
-            da = torch.exp(dt_t.unsqueeze(-1) * a)
-            db = dt_t.unsqueeze(-1) * bm[:, t].unsqueeze(1)
-            h = da * h + db * x[:, t].unsqueeze(-1)
-            ys.append((h * cm[:, t].unsqueeze(1)).sum(-1))
-        y = torch.stack(ys, dim=1) + x * self.D
+        if self.scan_mode == "chunked":
+            y = self._chunked_scan(x, dt, bm, cm, a)
+        else:
+            h = x.new_zeros(b, self.d_inner, self.d_state)
+            ys = []
+            for t in range(l):
+                dt_t = dt[:, t]
+                da = torch.exp(dt_t.unsqueeze(-1) * a)
+                db = dt_t.unsqueeze(-1) * bm[:, t].unsqueeze(1)
+                h = da * h + db * x[:, t].unsqueeze(-1)
+                ys.append((h * cm[:, t].unsqueeze(1)).sum(-1))
+            y = torch.stack(ys, dim=1)
+        y = y + x * self.D
         y = y * F.silu(z)
         return self.out_proj(y)
+
+    def _chunked_scan(self, x, dt, bm, cm, a):
+        """Chunked parallel scan of h_t = a_t h_{t-1} + b_t.
+
+        Within a chunk, h_t = exp(logcp_t) h0 + sum_{i<=t} exp(logcp_t-logcp_i) b_i.
+        One triangular matmul per chunk replaces `chunk_size` Python iterations.
+        """
+        b, l, d = x.shape
+        device = x.device
+        out = x.new_zeros(b, l, d)
+        h = x.new_zeros(b, d, self.d_state)
+        c = max(1, int(self.scan_chunk))
+        tril = torch.tril(torch.ones(c, c, device=device, dtype=torch.bool))
+        for start in range(0, l, c):
+            end = min(l, start + c)
+            n = end - start
+            dt_c = dt[:, start:end]
+            x_c = x[:, start:end]
+            bm_c = bm[:, start:end]
+            cm_c = cm[:, start:end]
+            da = torch.exp(dt_c.unsqueeze(-1) * a)
+            db = dt_c.unsqueeze(-1) * bm_c.unsqueeze(2) * x_c.unsqueeze(-1)
+            logcp = torch.cumsum(torch.log(da.clamp_min(1e-20)), dim=1)
+            cp = torch.exp(logcp)
+            diff = (logcp.unsqueeze(2) - logcp.unsqueeze(1)).clamp_max(0.0)
+            coef = torch.exp(diff) * tril[:n, :n].view(1, n, n, 1, 1)
+            hout = torch.einsum("btids,bids->btds", coef, db[:, :n]) + cp * h.unsqueeze(1)
+            out[:, start:end] = (hout * cm_c.unsqueeze(2)).sum(-1)
+            h = hout[:, -1]
+        return out
 
 
 class DenseFFN(nn.Module):
@@ -221,10 +257,12 @@ class MambaBlock(nn.Module):
         ffn_mode="dense",
         moe_kwargs=None,
         ffn_hidden=None,
+        scan_mode="sequential",
+        scan_chunk=16,
     ):
         super().__init__()
         self.norm1 = RMSNorm(d_model)
-        self.ssm = SelectiveSSM(d_model, d_state=d_state, expand=expand)
+        self.ssm = SelectiveSSM(d_model, d_state=d_state, expand=expand, scan_mode=scan_mode, scan_chunk=scan_chunk)
         self.norm2 = RMSNorm(d_model)
         if ffn_mode == "moe":
             self.ffn = LowRankMoE(d_model, **(moe_kwargs or {}))
@@ -282,6 +320,8 @@ class MambaMoE(nn.Module):
         local_context=0,
         sandwich=False,
         mirror_points=256,
+        scan_mode="sequential",
+        scan_chunk=16,
     ):
         super().__init__()
         self.vocab_size = vocab_size
@@ -315,6 +355,8 @@ class MambaMoE(nn.Module):
                     ffn_mode=ffn_mode,
                     moe_kwargs=moe_kwargs,
                     ffn_hidden=ffn_hidden,
+                    scan_mode=scan_mode,
+                    scan_chunk=scan_chunk,
                 )
                 for _ in range(n_layers)
             ]

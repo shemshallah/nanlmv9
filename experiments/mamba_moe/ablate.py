@@ -27,6 +27,8 @@ CONFIGS = {
     "local_ctx": {"moe_position": "ffn", "pair_matrix": True, "local_context": 4},
     "local_ctx8": {"moe_position": "ffn", "pair_matrix": True, "local_context": 8},
     "local_ctx16": {"moe_position": "ffn", "pair_matrix": True, "local_context": 16},
+    "local_ctx32": {"moe_position": "ffn", "pair_matrix": True, "local_context": 32},
+    "local_ctx64": {"moe_position": "ffn", "pair_matrix": True, "local_context": 64},
     "sandwich": {"moe_position": "ffn", "pair_matrix": True, "sandwich": True},
     "prior_gate": {
         "moe_position": "ffn",
@@ -63,6 +65,8 @@ def build_cmd(name, cfg, args):
         "--log-interval", str(max(1, args.steps // 3)),
         "--threads", str(args.threads),
         "--device", args.device,
+        "--scan", "chunked",
+        "--scan-chunk", "16",
         "--moe-position", cfg.get("moe_position", "bottom"),
         "--retrieval-tokens", str(args.retrieval_tokens),
         "--retrieval-items", str(args.retrieval_items),

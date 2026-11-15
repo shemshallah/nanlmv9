@@ -16,6 +16,8 @@ PRESETS = {
         seq_len=64,
         lr=3e-4,
         steps=200,
+        scan="sequential",
+        scan_chunk=16,
     ),
     "100m": dict(
         d_model=768,
@@ -33,5 +35,7 @@ PRESETS = {
         seq_len=128,
         lr=2e-4,
         steps=2000,
+        scan="chunked",
+        scan_chunk=16,
     ),
 }

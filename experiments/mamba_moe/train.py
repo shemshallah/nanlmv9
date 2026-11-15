@@ -7,6 +7,7 @@ import os
 import time
 
 import numpy as np
+import subprocess
 import torch
 import torch.nn.functional as F
 
@@ -139,6 +140,8 @@ def main():
     ap.add_argument("--local-context", type=int, default=0)
     ap.add_argument("--sandwich", action="store_true")
     ap.add_argument("--mirror-points", type=int, default=256)
+    ap.add_argument("--scan", choices=("sequential", "chunked"), default="sequential")
+    ap.add_argument("--scan-chunk", type=int, default=16)
     ap.add_argument("--prior", choices=("none", "unigram", "bigram"), default="none")
     ap.add_argument("--prior-weight", type=float, default=1.0)
     ap.add_argument("--prior-tokens", type=int, default=2_000_000)
@@ -170,6 +173,10 @@ def main():
     ap.add_argument("--preset", choices=("10m", "100m"), default=None)
     ap.add_argument("--preset-smoke", action="store_true")
     ap.add_argument("--max-seconds", type=float, default=None)
+    ap.add_argument("--cm-dump", default=None, help="run gated CM residual eval after training")
+    ap.add_argument("--cm-window", default=os.path.join(HERE, "..", "..", "v9", "win_valid8_4k.bin"))
+    ap.add_argument("--cm-bytes", type=int, default=1000)
+    ap.add_argument("--cm-gate-steps", type=int, default=100)
     ap.add_argument("--amp", action="store_true", help="CUDA mixed precision")
     ap.add_argument("--smoke", action="store_true")
     args = ap.parse_args()
@@ -226,6 +233,8 @@ def main():
         local_context=args.local_context,
         sandwich=args.sandwich,
         mirror_points=args.mirror_points,
+        scan_mode=args.scan,
+        scan_chunk=args.scan_chunk,
     )
     print(f"params={count_params(model):,}")
     if args.device == "auto":
@@ -377,6 +386,15 @@ def main():
             indent=1,
         )
     print(f"saved {args.out}/last.pt")
+    if args.cm_dump:
+        cmd = [sys.executable, os.path.join(HERE, "cm_residual_smoke.py"),
+               "--ckpt", os.path.join(args.out, "last.pt"),
+               "--data-dir", args.data_dir, "--cm-dump", args.cm_dump,
+               "--window", args.cm_window, "--max-bytes", str(args.cm_bytes),
+               "--gate-steps", str(args.cm_gate_steps),
+               "--out", os.path.join(args.out, "cm_gate.json")]
+        print("running gated CM residual:", " ".join(cmd))
+        subprocess.run(cmd, check=False)
 
 
 if __name__ == "__main__":
