@@ -16,6 +16,8 @@ from hybrid import NGramPrior, ContextGate, mixture_logits
 from presets import PRESETS
 from retrieval import build_retriever, KNNRetriever
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+
 
 def load_meta(data_dir):
     meta = json.load(open(os.path.join(data_dir, "meta.json")))
