@@ -45,7 +45,7 @@ class ByteResidualLoss:
                     nbytes += 1
                     prefix += bytes([b])
                     continue
-                cm = self.cm_prior.logits(int(byte_offsets[i]) + j)
+                cm = self.cm_prior.logits(int(byte_offsets[i]) + j).to(token_logits.device)
                 nn = torch.log(nd.clamp_min(1e-12))
                 if self.gate is not None:
                     ex = None

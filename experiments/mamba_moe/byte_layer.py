@@ -20,11 +20,12 @@ import torch.nn.functional as F
 
 
 class TrieNode:
-    __slots__ = ("children", "token_ids")
+    __slots__ = ("children", "token_ids", "torch_ids")
 
     def __init__(self):
         self.children = {}
         self.token_ids = []
+        self.torch_ids = None
 
 
 class ByteTrie:
@@ -53,10 +54,17 @@ class ByteTrie:
         vocab = [bytes.fromhex(h) for h in meta["vocab_hex"]]
         return cls(vocab), meta
 
+    def to(self, device):
+        for n in self.nodes:
+            n.torch_ids = torch.as_tensor(n.token_ids, dtype=torch.long, device=device)
+        return self
+
     def _mass(self, probs, node):
-        ids = node.token_ids
-        if not ids:
+        if not node.token_ids:
             return probs.new_zeros(probs.shape[0])
+        ids = node.torch_ids
+        if ids is None or ids.device != probs.device:
+            ids = torch.as_tensor(node.token_ids, dtype=torch.long, device=probs.device)
         return probs[:, ids].sum(-1)
 
     def byte_nll(self, token_logits, target_ids):
