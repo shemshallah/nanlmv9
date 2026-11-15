@@ -14,7 +14,7 @@ if [[ ! "$keep" =~ ^[0-9]+$ ]] || (( keep < 1 )); then
 fi
 
 mapfile -t tags < <(
-  gh release list --repo "$repo" --limit 100 \
+  gh release list --repo "$repo" --limit 200 \
     --json tagName,createdAt \
     --jq '.[] | select(.tagName | startswith("dev-v9-")) | [.createdAt, .tagName] | @tsv' \
   | sort -r | cut -f2

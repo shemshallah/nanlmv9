@@ -166,7 +166,8 @@ jobs:
           fi
           tar -czf "release/nanlmv9-source-${TAG}.tar.gz" \
             README.md LICENSE Makefile \
-            v9/nancm.c v9/bpe.py v9/bpe_merges.txt v9/mkwin.py v9/run_v9.py \
+            v9/Makefile v9/nancm.c v9/bpe.py v9/bpe_merges.txt v9/mkwin.py \
+            v9/run_v9.py v9/metrics_v9_dev.json \
             v9/win_valid40.bin v9/win_test10.bin v9/win_test40.bin \
             scripts .github/workflows
 
