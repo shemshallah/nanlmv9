@@ -175,7 +175,7 @@ class KNNRetriever:
         k = min(self.k, sim.shape[1])
         vals, idx = torch.topk(sim, k, dim=-1)
         weights = F.softmax(vals * 10.0, dim=-1)
-        out = torch.zeros(h.shape[0], self.vocab_size)
+        out = torch.zeros(h.shape[0], self.vocab_size, device=h.device)
         for j in range(k):
             out.scatter_add_(1, self.vals[idx[:, j]].unsqueeze(1), weights[:, j : j + 1])
         out = out.clamp_min(1e-9)
