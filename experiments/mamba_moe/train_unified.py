@@ -15,8 +15,8 @@ sys.path.insert(0, os.path.join(HERE, "..", "..", "v9"))
 from bpe import BPE
 from byte_layer import ByteTrie, CMBytePrior
 from cm_residual_smoke import load_window_bytes, build_word_map, encode_text
-from unified import UnifiedByteLM, boundary_loss, normalized_word_bpb, fusion_features
-from retrieval import build_retriever
+from unified import UnifiedByteLM, boundary_loss, normalized_word_bpb, fusion_features, boundary_metrics
+from retrieval import MultiMatchIndex
 
 
 def chunk(ids, lens, recon, offs, start, ntok):
@@ -25,6 +25,15 @@ def chunk(ids, lens, recon, offs, start, ntok):
     bstart = offs[start]
     bids = list(recon[bstart:bstart + sum(ls)])
     return tids, ls, bids, bstart
+
+
+def byte_contexts(bids, order):
+    n = max(0, len(bids) - 1)
+    ctx = torch.zeros(n, order, dtype=torch.long)
+    for p in range(1, len(bids)):
+        prev = bids[max(0, p - order):p]
+        ctx[p - 1, order - len(prev):] = torch.tensor(prev, dtype=torch.long)
+    return ctx
 
 
 def main():
@@ -47,6 +56,8 @@ def main():
     ap.add_argument("--eval-window", default=None)
     ap.add_argument("--eval-cm-dump", default=None)
     ap.add_argument("--eval-chunks", type=int, default=20)
+    ap.add_argument("--retrieval", choices=("none", "multimatch"), default="none")
+    ap.add_argument("--retrieval-order", type=int, default=4)
     ap.add_argument("--save-interval", type=int, default=500)
     ap.add_argument("--result-json", default=None)
     ap.add_argument("--selftest", action="store_true")
@@ -64,6 +75,10 @@ def main():
     for l in lens: offs.append(p); p += l
     print(f"tokens={len(ids):,} bytes={len(recon):,}")
     cm = CMBytePrior.load(args.cm_dump) if args.cm_dump else None
+    retriever = None
+    if args.retrieval == "multimatch":
+        retriever = MultiMatchIndex(order=args.retrieval_order, vocab_size=256)
+        retriever.build(np.frombuffer(recon, dtype=np.uint8), max_tokens=min(len(recon), 2_000_000))
     model = UnifiedByteLM(meta["vocab_size"], d_model=args.d_model, char_model=args.char_model,
                           experts=args.experts, scan_mode=args.scan, scan_chunk=args.scan_chunk).to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr)
@@ -96,10 +111,13 @@ def main():
                 if ep is not None:
                     rows=[ep.logits(bs+1+p) for p in range(len(bids)-1)]
                     cm_l=torch.stack(rows).to(device)
-                    mixed,w,_=model.fuse_bytes(out["char_logits"], cm_l, training=False, cap=0.9)
+                    extra=torch.tensor(ep.probs[bs+1:bs+len(bids),0],dtype=torch.float32,device=device)[:,None]
+                    ret_l=retriever.logits(byte_contexts(bids,args.retrieval_order)).to(device) if retriever is not None else None
+                    mixed,w,_=model.fuse_bytes(out["char_logits"], cm_l, ret_l, extra=extra, training=False, cap=0.9)
                     cl=mixed.reshape(-1,256); wcm+=float(w[:,1].mean())
                 csum+=float(F.cross_entropy(cl,by.reshape(-1),reduction="sum")); ccnt+=by.numel()
-        return {"word_bpb":wsum/math.log(2)/max(1,wcnt),"char_bpc":csum/math.log(2)/max(1,ccnt),"cm_weight":wcm/max(1,chunks),"bytes":int(ccnt)}
+        bm = boundary_metrics(out["boundary_logits"], tl)
+        return {"word_bpb":wsum/math.log(2)/max(1,wcnt),"char_bpc":csum/math.log(2)/max(1,ccnt),"cm_weight":wcm/max(1,chunks),"bytes":int(ccnt),**bm}
 
     t0=time.time(); n=args.tokens
     for step in range(args.steps):
@@ -118,10 +136,15 @@ def main():
         word_ce=F.cross_entropy(wl,ty)
         bloss=boundary_loss(out["boundary_logits"],tl)
         cl=out["char_logits"].float().reshape(-1,256)
+        cm_l = None; ret_l = None; extra = None
         if cm is not None and bs+len(bids)<=cm.n:
             rows=[cm.logits(bs+1+p) for p in range(len(bids)-1)]
             cm_l=torch.stack(rows).to(device)
-            mixed,w,_=model.fuse_bytes(out["char_logits"],cm_l,training=True,cap=0.9)
+            extra=torch.tensor(cm.probs[bs+1:bs+len(bids),0],dtype=torch.float32,device=device)[:,None]
+        if retriever is not None:
+            ret_l=retriever.logits(byte_contexts(bids,args.retrieval_order)).to(device)
+        if cm_l is not None or ret_l is not None:
+            mixed,w,_=model.fuse_bytes(out["char_logits"],cm_l,ret_l,extra=extra,training=True,cap=0.9)
             cl=mixed.reshape(-1,256)
         char_loss=F.cross_entropy(cl,by.reshape(-1))
         loss=word_ce+0.1*bloss+0.1*char_loss

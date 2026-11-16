@@ -229,6 +229,42 @@ def boundary_loss(boundary_logits, lengths):
     return F.binary_cross_entropy_with_logits(boundary_logits, gold)
 
 
+def predict_boundaries(boundary_logits, threshold=0.5):
+    """Causal boundary prediction. Returns bool mask [B,Lb] with last byte forced."""
+    mask = torch.sigmoid(boundary_logits) > threshold
+    mask[:, -1] = True
+    return mask
+
+
+def boundary_lengths(boundary_logits, threshold=0.5):
+    """Convert predicted boundary mask into per-token byte lengths."""
+    mask = predict_boundaries(boundary_logits, threshold).cpu()
+    out = []
+    for row in mask:
+        idx = torch.nonzero(row, as_tuple=False).flatten().tolist()
+        prev = -1
+        lens = []
+        for i in idx:
+            lens.append(i - prev)
+            prev = i
+        out.append(lens)
+    return out
+
+
+def boundary_metrics(boundary_logits, gold_lengths, threshold=0.5):
+    mask = predict_boundaries(boundary_logits, threshold)
+    gold = torch.zeros_like(mask)
+    ends = (torch.cumsum(gold_lengths, 1) - 1).clamp(0, mask.shape[1] - 1)
+    gold.scatter_(1, ends, True)
+    tp = (mask & gold).sum().item()
+    fp = (mask & ~gold).sum().item()
+    fn = (~mask & gold).sum().item()
+    prec = tp / max(1, tp + fp)
+    rec = tp / max(1, tp + fn)
+    f1 = 2 * prec * rec / max(1e-9, prec + rec)
+    return {"boundary_precision": prec, "boundary_recall": rec, "boundary_f1": f1}
+
+
 def build_unified(vocab_size=32000, d_model=256, char_model=64, **kw):
     return UnifiedByteLM(vocab_size, d_model=d_model, char_model=char_model, **kw)
 
