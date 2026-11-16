@@ -269,6 +269,24 @@ not a Termux training run.  The CPU path is still useful for:
 - small overfit/debug runs
 - CM-sidecar inference and mixing
 
+### WordNet 3.1 d256 / d512 10-minute smokes
+
+Found `/sdcard/Download/NaNLMind/wn3.1.dict.zip`, extracted all WordNet 3.1
+glosses: **8.6 MB, 117,791 synsets**.  Trained on a 256 KB WordNet train slice
+with the 17-context CM prior, chunk-4, held-out wt2 valid.
+
+| model | params | train word CE | held-out word bpb | held-out char bpc | held-out CM weight |
+|---|---:|---:|---:|---:|---:|
+| d256 | 10.62M | 3.940 | **3.205** | 2.360 | 0.579 |
+| d512 | 23.99M | 3.387 | 3.279 | 2.403 | 0.603 |
+
+Both overfit the 256 KB WordNet slice and transfer poorly to wt2.  The d256
+model is slightly better held out; extra d512 capacity is not useful with this
+little data.  WordNet is useful for vocabulary/concept coverage, but it is not
+a substitute for natural-text training.
+
+Kernel: https://www.kaggle.com/code/shem42/nanlmv9-wordnet-d256-d512
+
 ### True byte-first 10-minute smoke (held-out valid)
 
 This is the corrected hierarchy: the char branch receives **only the previous
