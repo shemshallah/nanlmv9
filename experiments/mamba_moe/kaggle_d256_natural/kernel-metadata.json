@@ -1,0 +1,14 @@
+{
+  "id": "shem42/nanlmv9-d256-natural-bytefirst",
+  "title": "nanlmv9 d256 natural bytefirst",
+  "code_file": "kaggle_d256_natural.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": [],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "model_sources": []
+}

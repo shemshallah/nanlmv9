@@ -17,7 +17,7 @@ from byte_layer import CMBytePrior
 from hybrid import ContextGate
 
 
-def eval_heldout(model, gate, cm_prior, ids, lens, offs, recon, vocab_size, tokens, chunks, device):
+def eval_heldout(model, gate, cm_prior, word_prior, word_gate, ids, lens, offs, recon, vocab_size, tokens, chunks, device):
     model.eval()
     seq = min(tokens, len(ids) - 1)
     chunks = min(chunks, max(1, (len(ids) - seq - 1) // seq))
@@ -34,7 +34,12 @@ def eval_heldout(model, gate, cm_prior, ids, lens, offs, recon, vocab_size, toke
             if int(extra.sum())>bx.shape[1]: extra[-1]-=int(extra.sum())-bx.shape[1]
             wl,cl,_=model(tx,bx,extra,previous_only=True)
             wl,cl=wl.float().reshape(-1,vocab_size),cl.float().reshape(-1,256)
-            wsum+=float(F.cross_entropy(wl,ty.reshape(-1),reduction='sum')); wcnt+=ty.numel()
+            if word_prior is not None:
+                wp=word_prior[None].expand(wl.shape[0],-1); ex=torch.linspace(0,1,wl.shape[0],device=device)[:,None]
+                wm,ww=word_gate([wl,wp],extra=ex); wsum+=float(F.cross_entropy(wm,ty.reshape(-1),reduction='sum')); wcm_word=float(ww[:,1].mean())
+            else:
+                wsum+=float(F.cross_entropy(wl,ty.reshape(-1),reduction='sum')); wcm_word=0.0
+            wcnt+=ty.numel()
             if cm_prior is not None:
                 rows=[cm_prior.logits(bst+p) for p in range(1,len(bids))]
                 cm=torch.stack(rows).to(device); ex=torch.linspace(0,1,cm.shape[0],device=device)[:,None]
@@ -70,6 +75,7 @@ def main():
     ap.add_argument("--eval-window", default=None)
     ap.add_argument("--eval-cm-dump", default=None)
     ap.add_argument("--eval-chunks", type=int, default=20)
+    ap.add_argument("--word-prior", default=None)
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
     if args.device == "auto":
@@ -99,7 +105,9 @@ def main():
     model.to(device)
     cm_prior = CMBytePrior.load(args.cm_dump) if args.cm_dump else None
     gate = ContextGate(n_sources=2, hidden=64, extra_features=1).to(device) if cm_prior else None
-    params = list(model.parameters()) + (list(gate.parameters()) if gate else [])
+    word_prior = torch.from_numpy(__import__("numpy").load(args.word_prior)).to(device) if args.word_prior else None
+    word_gate = ContextGate(n_sources=2, hidden=64, extra_features=1).to(device) if word_prior is not None else None
+    params = list(model.parameters()) + (list(gate.parameters()) if gate else []) + (list(word_gate.parameters()) if word_gate else [])
     opt = torch.optim.AdamW(params, lr=args.lr)
     start_step = 0
     if args.resume:
@@ -116,6 +124,7 @@ def main():
     t0 = __import__("time").time()
     last = (0.0, 0.0)
     last_w_cm = 0.0
+    last_w_word = 0.0
     for step in range(start_step, args.steps):
         if args.max_seconds and (__import__("time").time() - t0) >= args.max_seconds:
             print(f"time budget reached at step {step}")
@@ -142,7 +151,16 @@ def main():
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=(args.amp and device.type == "cuda")):
             wl, cl, aux = model(tok_x, byte_x, char_extra_lens)
         wl, cl = wl.float(), cl.float()
-        word_loss = F.cross_entropy(wl.reshape(-1, meta["vocab_size"]), tok_y.reshape(-1))
+        wl_flat = wl.reshape(-1, meta["vocab_size"])
+        if word_prior is not None:
+            wp = word_prior[None].expand(wl_flat.shape[0], -1)
+            ex = torch.linspace(0, 1, wl_flat.shape[0], device=device)[:, None]
+            wmix, ww = word_gate([wl_flat, wp], extra=ex)
+            word_loss = F.cross_entropy(wmix, tok_y.reshape(-1))
+            last_w_word = float(ww[:, 1].mean())
+        else:
+            word_loss = F.cross_entropy(wl_flat, tok_y.reshape(-1))
+            last_w_word = 0.0
         if cm_prior is not None:
             cm_rows = [cm_prior.logits(byte_start + p) for p in range(1, len(bids))]
             cm_logits = torch.stack(cm_rows).to(device)
@@ -171,12 +189,13 @@ def main():
         elens = [len(vocab[i]) for i in eids]; eoffs=[]; pp=0
         for l in elens: eoffs.append(pp); pp+=l
         eprior = CMBytePrior.load(args.eval_cm_dump) if args.eval_cm_dump else None
-        eval_metrics = eval_heldout(model, gate, eprior, eids, elens, eoffs, erecon,
+        eval_metrics = eval_heldout(model, gate, eprior, word_prior, word_gate, eids, elens, eoffs, erecon,
                                     meta["vocab_size"], args.tokens, args.eval_chunks, device)
         print("heldout", json.dumps(eval_metrics))
     if args.result_json:
         json.dump({"word_ce": last[0], "char_bpc": last[1], "params": model.params(),
-                   "mean_w_cm": last_w_cm, "heldout": eval_metrics, "config": vars(args)},
+                   "mean_w_cm": last_w_cm, "mean_w_word_prior": last_w_word,
+                   "heldout": eval_metrics, "config": vars(args)},
                   open(args.result_json, "w"), indent=1)
     torch.save({"model": model.state_dict(), "gate": gate.state_dict() if gate else None,
                 "opt": opt.state_dict(), "step": step + 1, "config": vars(args),
