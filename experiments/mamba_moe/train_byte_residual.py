@@ -36,6 +36,10 @@ def main():
     ap.add_argument("--max-seconds", type=float, default=None)
     ap.add_argument("--grad-accum", type=int, default=1)
     ap.add_argument("--result-json", default=None)
+    ap.add_argument("--sandwich", action="store_true")
+    ap.add_argument("--local-context", type=int, default=0)
+    ap.add_argument("--scan", choices=("sequential", "chunked"), default="sequential")
+    ap.add_argument("--scan-chunk", type=int, default=16)
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
 
@@ -64,7 +68,9 @@ def main():
     model = MambaMoE(meta["vocab_size"], d_model=args.d_model, n_layers=args.layers,
                      d_state=8, n_experts=args.experts, rank=4, top_k=2,
                      shared_hidden=2 * args.d_model, moe_position="ffn",
-                     pair_matrix=True, sandwich=False).to(device)
+                     pair_matrix=True, sandwich=args.sandwich,
+                     local_context=args.local_context, scan_mode=args.scan,
+                     scan_chunk=args.scan_chunk).to(device)
     gate = ContextGate(n_sources=2, hidden=64, extra_features=1).to(device)
     loss_fn = ByteResidualLoss(trie, prior, gate, vocab)
     params = list(model.parameters()) + list(gate.parameters())
