@@ -32,6 +32,8 @@ class ByteResidualLoss:
 
     def __call__(self, token_logits, target_ids, byte_offsets, extra=None, cm_weight=1.0):
         # token_logits: [N, V], target_ids: [N], byte_offsets: [N] first byte pos
+        if extra is not None:
+            extra = extra.to(token_logits.device)
         nll = token_logits.new_zeros(())
         nbytes = 0
         for i in range(token_logits.shape[0]):
