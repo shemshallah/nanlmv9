@@ -269,6 +269,34 @@ not a Termux training run.  The CPU path is still useful for:
 - small overfit/debug runs
 - CM-sidecar inference and mixing
 
+### d256 natural-text + WordNet/wordlist prior — 10-minute held-out smoke
+
+Wiring used:
+- tokenizer built from wt2 train + WordNet 3.1 + NaNROUTER wordlists
+- **natural wt2 train text** (512 KB) for LM training, not WordNet definitions
+- WordNet/wordlist unigram word prior through a learned word gate
+- true previous-token-only char conditioning
+- 17-context train CM prior, 17-context valid CM prior
+- chunk-4, d256 / char64, 10 minutes T4
+
+| metric | value |
+|---|---:|
+| params | 10,621,257 |
+| steps | 1,982 |
+| train word CE | 4.721 |
+| train char bpc | 0.845 |
+| **held-out word bpb** | **1.9734** |
+| held-out char bpc | 1.9661 |
+| held-out CM gate weight | **0.9995** |
+| held-out word-prior weight | **0.0013** |
+
+The natural-text mix is much better than WordNet-only d256 (3.205 held-out
+word bpb), but 512 KB is still far too little.  The word-prior gate rejects the
+WordNet/wordlist prior almost completely, and the CM gate saturates on
+held-out data.  This is a wiring/diagnostic result, not a win over v9.
+
+Kernel: https://www.kaggle.com/code/shem42/nanlmv9-d256-natural-bytefirst
+
 ### WordNet 3.1 d256 / d512 10-minute smokes
 
 Found `/sdcard/Download/NaNLMind/wn3.1.dict.zip`, extracted all WordNet 3.1
