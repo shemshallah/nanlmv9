@@ -269,6 +269,26 @@ not a Termux training run.  The CPU path is still useful for:
 - small overfit/debug runs
 - CM-sidecar inference and mixing
 
+### True byte-first 10-minute smoke (held-out valid)
+
+This is the corrected hierarchy: the char branch receives **only the previous
+token's** word hidden state, so it cannot see the current token's bytes.
+
+- train: 256 KB wt2 train slice + 17-context train CM prior
+- eval: full wt2 valid, 20 chunks, 1,280 tokens / 4,179 bytes
+- 23,992,969 params, chunk-4, 10-minute T4 run
+- 2,109 steps
+- train: word CE 3.397, char bpc 0.839
+- **held-out: word bpb 2.070, char bpc 1.966**
+- held-out mean CM weight **0.999**
+
+The gap between train and held-out is the important result: with only 256 KB of
+training text, both word and char branches overfit, and the gate collapses onto
+the CM prior on held-out data.  The 0.839 train char bpc is not a valid model
+score; the held-out 2.070 word bpb is.
+
+Kernel: https://www.kaggle.com/code/shem42/nanlmv9-bytefirst-10min
+
 ### 24M unified 3-minute / 6-hour runs
 
 The 24M unified model uses the 53M d512 training settings (d512, char128,
