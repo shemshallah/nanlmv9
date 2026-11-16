@@ -8,15 +8,15 @@
 #include <stdint.h>
 typedef uint8_t u8; typedef uint16_t u16; typedef uint32_t u32; typedef uint64_t u64;
 
-#define NCTX 22
+#define NCTX 26
 #define NMM 2
 #define NIN (NCTX*2 + 2 + NMM*2 + 1)
 #define NMIX 5
 #define MAXH (48u<<20)
 
 typedef struct { u16 p; u8 n; u8 chk; } Slot;
-static int TBITS[NCTX] = {18,24,24,24,24,24,24, 22,24,24, 22,24, 24,24, 22,22,22,22,20,22,22,20};
-static const int LIMIT[NCTX] = {250,250,250,160,120,100,80, 250,120,80, 250,120, 200,160, 250,160,160,160,120,250,200,160};
+static int TBITS[NCTX] = {18,24,24,24,24,24,24, 22,24,24, 22,24, 24,24, 22,22,22,22,20,22,22,20, 20,22,20,22};
+static const int LIMIT[NCTX] = {250,250,250,160,120,100,80, 250,120,80, 250,120, 200,160, 250,160,160,160,120,250,200,160, 160,250,120,200};
 static Slot *T[NCTX]; static Slot o0t[256];
 static int rt[256]; static float conf[256];
 static float stab[4096];
@@ -39,7 +39,7 @@ static int seg(const u8 *w,int L,int *t){ int n=L>48?48:L; for(int i=0;i<n;i++) 
     if(best<0)break; t[best]=256+(br-1); for(int i=best+1;i<n-1;i++) t[i]=t[i+1]; n--; } return n; }
 
 // ---------- byte state ----------
-typedef struct { u32 c4,c8; u32 wh,pw1,pw2; u32 fwh; int wlen,linepos; u8 w[64]; int mptr[NMM], mlen[NMM]; int mmatched[NMM]; } BS;
+typedef struct { u32 c4,c8; u32 wh,pw1,pw2; u32 fwh; int wlen,linepos,wcount; u8 w[64]; int mptr[NMM], mlen[NMM]; int mmatched[NMM]; } BS;
 static BS bs;
 static u32 *mht[NMM]; static const int MINLEN[NMM]={5,12}; static const int MHB=22;
 static float msm[NMM][64];
@@ -66,6 +66,8 @@ static void bs_push(BS *s,int c){
   s->c8=(s->c8<<8)|(s->c4>>24); s->c4=(s->c4<<8)|c;
   if(isword(c)){ s->wh=mix(s->wh+1,c); s->fwh=mix(s->fwh+1,fold(c)); if(s->wlen<63) s->w[s->wlen]=(u8)c; s->wlen++; }
   else { if(s->wlen>0){ s->pw2=s->pw1; s->pw1=s->wh; } s->wh=0; s->fwh=0; s->wlen=0; }
+  if(c==' '&&s->wlen>0) s->wcount++;
+  if(c=='.'||c=='!'||c=='?'||c=='\n') s->wcount=0;
   s->linepos = (c=='\n') ? 0 : s->linepos+1;
   mm_byte_update(s,c);
 }
@@ -97,6 +99,10 @@ static void compute_ctx(const BS *s){
   h[19]= mix(s->pw1 ^ ((u32)(s->wlen>15?15:s->wlen)<<24),19);
   h[20]= mix(indirect[(c2<<8)|c1],20);
   { u32 dist=histlen-lastpos[c1]; if(dist>4095)dist=4095; h[21]= mix(dist | ((u32)c1<<12),21); }
+  h[22]= mix((u32)(s->wcount>31?31:s->wcount) | ((u32)c1<<8),22);
+  h[23]= mix(s->pw1 ^ ((u32)(s->wlen>0?s->w[0]:0)<<24) ^ ((u32)(s->wlen>15?15:s->wlen)<<16),23);
+  { u32 bc=0; for(int k=0;k<3;k++){ int cc=(k==0?c1:(k==1?c2:c3)); int cl=(cc>='a'&&cc<='z')?0:(cc>='A'&&cc<='Z')?1:(cc>='0'&&cc<='9')?2:(cc==' ')?3:(cc=='\n')?4:(cc>=0x80)?5:6; bc|=((u32)cl)<<(k*4); } h[24]= mix(bc,24); }
+  h[25]= mix(c1 | (c2<<8) | (c3<<16),25);
   cls_c1 = (c1>='a'&&c1<='z')?0:(c1>='A'&&c1<='Z')?1:(c1>='0'&&c1<='9')?2:(c1==' ')?3:(c1=='\n')?4:(c1>=0x80)?5:6;
   wl_sel = (s->wlen>7?7:s->wlen)*8+cls_c1; // 64
 }

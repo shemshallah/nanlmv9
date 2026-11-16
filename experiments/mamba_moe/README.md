@@ -275,12 +275,14 @@ Full train on Shakespeare + wt2_train, `-tshift 3`, 8×4k valid windows:
 
 | context set | frozen bpc | online bpc | wall |
 |---|---:|---:|---:|
-| 14 stable | 1.5902 | 1.5202 | 4m59 |
+| 14 stable | **1.5902** | 1.5202 | 4m59 |
 | 22 expanded | 1.5983 | **1.5128** | 7m07 |
+| 26 expanded | 1.6100 | 1.5176 | 11m28 |
 
-The extra contexts trade a slight frozen regression for a slight online gain
-and 42% more compute.  They are **not promoted** to the stable core yet; the
-context sweep continues until a set is unambiguously better.
+The 22-context set gains 0.0074 online but loses 0.0081 frozen.  The 26-context
+set is worse on both axes and costs 2.3× the stable compute.  The context sweep
+has now hit the “it hurts” point: 22 is the best online trade-off, 26 is a
+regression.  Neither is promoted to the stable core.
 
 ### Real CM prior residual smoke
 
