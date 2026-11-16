@@ -1,0 +1,14 @@
+{
+  "id": "shem42/nanlmv9-unified24-6h",
+  "title": "nanlmv9 unified24 6h",
+  "code_file": "kaggle_unified24_6h.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": [],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "model_sources": []
+}

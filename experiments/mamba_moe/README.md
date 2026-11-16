@@ -269,6 +269,26 @@ not a Termux training run.  The CPU path is still useful for:
 - small overfit/debug runs
 - CM-sidecar inference and mixing
 
+### 24M unified 3-minute / 6-hour runs
+
+The 24M unified model uses the 53M d512 training settings (d512, char128,
+64 experts, lr 2e-4, chunk-4 scan, 17-context CM prior).
+
+3-minute T4 smoke:
+
+- 23,992,969 params
+- 599 steps in 180 s
+- word CE **5.624**
+- char bpc **1.410**
+- mean CM gate weight **0.717**
+
+That is **~2.19 word-branch bpb** at the 3-minute point.  The 6-hour run uses
+the same model/settings and saves a checkpoint every 1,000 steps; at the 3-minute
+throughput it should reach ~70k steps (~4.5M word tokens).
+
+- 3-min kernel: https://www.kaggle.com/code/shem42/nanlmv9-unified24-3min-smoke
+- 6-hour kernel: https://www.kaggle.com/code/shem42/nanlmv9-unified24-6h
+
 ### Unified 17-context word+char + CM gate + chunk-4
 
 10-minute T4 run of the unified architecture, not separate branches:
