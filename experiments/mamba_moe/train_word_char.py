@@ -161,7 +161,8 @@ def main():
             last_w_word = float(prior_nll.mean())
         else:
             last_w_word = 0.0
-        if cm_prior is not None:
+        use_cm = cm_prior is not None and (byte_start + len(bids) <= cm_prior.n)
+        if use_cm:
             cm_rows = [cm_prior.logits(byte_start + p) for p in range(1, len(bids))]
             cm_logits = torch.stack(cm_rows).to(device)
             if args.cm_drop > 0:
