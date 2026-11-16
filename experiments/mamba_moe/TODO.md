@@ -66,7 +66,7 @@ only smoke-tested / needs a longer run; `[ ]` still open.
 - [x] 10M CPU shape smoke
 - [x] 10M CPU 5-minute run: 11.56M params, 1,013 steps, bpc 2.1991
 - [x] 10M GPU 10-minute run: 11.56M params, 5,274 steps, bpc 1.8904
-- [x] 100M GPU 10-minute run: 112.92M params, 694 steps, bpc 2.0608
+- [x] 100M GPU 10-minute run: 112.92M params, 694 steps, bpc 2.0608 (not part of the 17-context run)
 - [x] d512 GPU 5-minute run: 53.20M params, 438 steps, bpc 2.1836
 - [x] Kaggle CPU ablation smoke (all retrieval backends execute)
 - [x] Kaggle GPU 20-step architecture smoke (v4 results recorded)

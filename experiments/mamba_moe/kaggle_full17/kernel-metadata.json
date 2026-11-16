@@ -1,0 +1,14 @@
+{
+  "id": "shem42/nanlmv9-full17-gated-hybrid",
+  "title": "nanlmv9 full17 gated hybrid",
+  "code_file": "kaggle_full17.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": [],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "model_sources": []
+}
