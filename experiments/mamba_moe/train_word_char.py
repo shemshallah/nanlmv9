@@ -17,7 +17,7 @@ from byte_layer import CMBytePrior
 from hybrid import ContextGate
 
 
-def eval_heldout(model, gate, cm_prior, word_prior, word_gate, ids, lens, offs, recon, vocab_size, tokens, chunks, device):
+def eval_heldout(model, gate, cm_prior, ids, lens, offs, recon, vocab_size, tokens, chunks, device, gate_max_cm=1.0):
     model.eval()
     seq = min(tokens, len(ids) - 1)
     chunks = min(chunks, max(1, (len(ids) - seq - 1) // seq))
@@ -34,16 +34,15 @@ def eval_heldout(model, gate, cm_prior, word_prior, word_gate, ids, lens, offs, 
             if int(extra.sum())>bx.shape[1]: extra[-1]-=int(extra.sum())-bx.shape[1]
             wl,cl,_=model(tx,bx,extra,previous_only=True)
             wl,cl=wl.float().reshape(-1,vocab_size),cl.float().reshape(-1,256)
-            if word_prior is not None:
-                wp=word_prior[None].expand(wl.shape[0],-1); ex=torch.linspace(0,1,wl.shape[0],device=device)[:,None]
-                wm,ww=word_gate([wl,wp],extra=ex); wsum+=float(F.cross_entropy(wm,ty.reshape(-1),reduction='sum')); wcm_word=float(ww[:,1].mean())
-            else:
-                wsum+=float(F.cross_entropy(wl,ty.reshape(-1),reduction='sum')); wcm_word=0.0
-            wcnt+=ty.numel()
+            wsum+=float(F.cross_entropy(wl,ty.reshape(-1),reduction='sum')); wcnt+=ty.numel()
             if cm_prior is not None:
                 rows=[cm_prior.logits(bst+p) for p in range(1,len(bids))]
                 cm=torch.stack(rows).to(device); ex=torch.linspace(0,1,cm.shape[0],device=device)[:,None]
-                mixed,cw=gate([cl,cm],extra=ex); wcm+=float(cw[:,1].sum()); csum+=float(F.cross_entropy(mixed,by.reshape(-1),reduction='sum'))
+                mixed,cw=gate([cl,cm],extra=ex)
+                if gate_max_cm < 1.0:
+                    cap=cw[:,1].clamp(max=gate_max_cm); cw=torch.stack([1.0-cap,cap],dim=-1)
+                    mixed=cw[:,:1]*cl+cw[:,1:]*cm
+                wcm+=float(cw[:,1].sum()); csum+=float(F.cross_entropy(mixed,by.reshape(-1),reduction='sum'))
             else:
                 csum+=float(F.cross_entropy(cl,by.reshape(-1),reduction='sum'))
             ccnt+=by.numel()
@@ -76,6 +75,10 @@ def main():
     ap.add_argument("--eval-cm-dump", default=None)
     ap.add_argument("--eval-chunks", type=int, default=20)
     ap.add_argument("--word-prior", default=None)
+    ap.add_argument("--word-prior-weight", type=float, default=0.05)
+    ap.add_argument("--cm-drop", type=float, default=0.1)
+    ap.add_argument("--gate-entropy", type=float, default=0.01)
+    ap.add_argument("--gate-max-cm", type=float, default=0.9)
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
     if args.device == "auto":
@@ -106,8 +109,7 @@ def main():
     cm_prior = CMBytePrior.load(args.cm_dump) if args.cm_dump else None
     gate = ContextGate(n_sources=2, hidden=64, extra_features=1).to(device) if cm_prior else None
     word_prior = torch.from_numpy(__import__("numpy").load(args.word_prior)).to(device) if args.word_prior else None
-    word_gate = ContextGate(n_sources=2, hidden=64, extra_features=1).to(device) if word_prior is not None else None
-    params = list(model.parameters()) + (list(gate.parameters()) if gate else []) + (list(word_gate.parameters()) if word_gate else [])
+    params = list(model.parameters()) + (list(gate.parameters()) if gate else [])
     opt = torch.optim.AdamW(params, lr=args.lr)
     start_step = 0
     if args.resume:
@@ -152,21 +154,28 @@ def main():
             wl, cl, aux = model(tok_x, byte_x, char_extra_lens)
         wl, cl = wl.float(), cl.float()
         wl_flat = wl.reshape(-1, meta["vocab_size"])
+        word_loss = F.cross_entropy(wl_flat, tok_y.reshape(-1))
         if word_prior is not None:
-            wp = word_prior[None].expand(wl_flat.shape[0], -1)
-            ex = torch.linspace(0, 1, wl_flat.shape[0], device=device)[:, None]
-            wmix, ww = word_gate([wl_flat, wp], extra=ex)
-            word_loss = F.cross_entropy(wmix, tok_y.reshape(-1))
-            last_w_word = float(ww[:, 1].mean())
+            prior_nll = -word_prior.gather(0, tok_y.reshape(-1))
+            word_loss = word_loss + args.word_prior_weight * prior_nll.mean()
+            last_w_word = float(prior_nll.mean())
         else:
-            word_loss = F.cross_entropy(wl_flat, tok_y.reshape(-1))
             last_w_word = 0.0
         if cm_prior is not None:
             cm_rows = [cm_prior.logits(byte_start + p) for p in range(1, len(bids))]
             cm_logits = torch.stack(cm_rows).to(device)
+            if args.cm_drop > 0:
+                drop = (torch.rand(cm_logits.shape[0], 1, device=device) < args.cm_drop)
+                cm_logits = cm_logits.masked_fill(drop, 0.0)
             ex = torch.linspace(0, 1, cm_logits.shape[0], device=device)[:, None]
             char_mixed, cw = gate([cl.reshape(-1, 256), cm_logits], extra=ex)
+            if args.gate_max_cm < 1.0:
+                cap = cw[:, 1].clamp(max=args.gate_max_cm)
+                cw = torch.stack([1.0 - cap, cap], dim=-1)
+                char_mixed = cw[:, :1] * cl.reshape(-1, 256) + cw[:, 1:] * cm_logits
             char_loss = F.cross_entropy(char_mixed, byte_y.reshape(-1))
+            ent = -(cw * torch.log(cw.clamp_min(1e-8))).sum(-1).mean()
+            char_loss = char_loss - args.gate_entropy * ent
             last_w_cm = float(cw[:, 1].mean())
         else:
             char_loss = F.cross_entropy(cl.reshape(-1, 256), byte_y.reshape(-1))
@@ -189,8 +198,8 @@ def main():
         elens = [len(vocab[i]) for i in eids]; eoffs=[]; pp=0
         for l in elens: eoffs.append(pp); pp+=l
         eprior = CMBytePrior.load(args.eval_cm_dump) if args.eval_cm_dump else None
-        eval_metrics = eval_heldout(model, gate, eprior, word_prior, word_gate, eids, elens, eoffs, erecon,
-                                    meta["vocab_size"], args.tokens, args.eval_chunks, device)
+        eval_metrics = eval_heldout(model, gate, eprior, eids, elens, eoffs, erecon,
+                                    meta["vocab_size"], args.tokens, args.eval_chunks, device, args.gate_max_cm)
         print("heldout", json.dumps(eval_metrics))
     if args.result_json:
         json.dump({"word_ce": last[0], "char_bpc": last[1], "params": model.params(),
