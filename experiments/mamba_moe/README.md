@@ -259,7 +259,7 @@ The model and tokenizer run on Termux, but CPU training is the bottleneck:
 
 A 10-minute word+char GPU smoke (`train_word_char.py`, 23.99M params) reached
 word CE **0.708** and char bpc **1.0708** on a small overfit window.  This is a
-wiring/smoke result, not a benchmark.
+wiring/smoke result, not a benchmark; the word→char bridge is active.
 
 The full 256-expert model is larger and slower.  This is a GPU/cloud experiment,
 not a Termux training run.  The CPU path is still useful for:
