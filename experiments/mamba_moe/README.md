@@ -269,6 +269,38 @@ not a Termux training run.  The CPU path is still useful for:
 - small overfit/debug runs
 - CM-sidecar inference and mixing
 
+### d256 regulated natural-text run — 10-minute held-out smoke
+
+Applied the four requested changes:
+
+1. larger natural-text slice: **512 KB wt2 train** (2× the prior 256 KB)
+2. WordNet/wordlist prior removed as a free gate source; used only as a small
+   auxiliary word loss
+3. CM gate regularized: source dropout 0.1, entropy bonus 0.01, hard cap 0.9
+4. d256
+
+| metric | value |
+|---|---:|
+| params | 10,621,257 |
+| steps | 2,231 |
+| train word CE | 4.670 |
+| train char bpc | 1.077 |
+| **held-out word bpb** | **1.9702** |
+| held-out char bpc | 1.8508 |
+| held-out CM gate weight | **0.8904** |
+| word-prior auxiliary NLL | **14.86** |
+
+Results:
+
+- gate cap/dropout worked: held-out CM weight fell from 0.9995 to **0.8904**;
+- char held-out bpc improved 1.966 → **1.8508**;
+- held-out word bpb barely moved: 1.9734 → **1.9702**;
+- the WordNet/wordlist prior is badly mismatched (aux NLL 14.86), so it should
+  be dropped as a training loss and used only for tokenizer/vocabulary;
+- 512 KB natural text is still the limiting factor.
+
+Kernel: https://www.kaggle.com/code/shem42/nanlmv9-d256-reg-10min
+
 ### d256 natural-text + WordNet/wordlist prior — 10-minute held-out smoke
 
 Wiring used:
