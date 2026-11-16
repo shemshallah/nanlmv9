@@ -4,6 +4,31 @@ This directory is the 32k-tokenizer + neural/hybrid branch that sits beside the
 v9 C context-mixing core.  It is deliberately small enough to run on Termux for
 smoke tests, while matching the architecture shape that can scale on a GPU.
 
+## Unified byte-first architecture
+
+`unified.py` is the new single graph:
+
+- byte SSM encoder
+- learned boundary head
+- byte→word feedback via gathered token-end byte states
+- word/concept Mamba/MoE with bottom/top sandwich, shared experts, pair matrices, mirror points
+- past-only word→char bridge
+- char SSM decoder
+- normalized word-token likelihood through the byte bijection
+- calibrated CM/retrieval fusion with source dropout, entropy bonus and weight cap
+- `train_unified.py` is the canonical training scaffold; it computes word bpb,
+  boundary BCE and gated char/CM loss in one step.
+
+Self-test:
+
+```sh
+python3 unified.py
+```
+
+The self-test exercises word, char, boundary, normalized bpb, CM fusion and
+multi-match retrieval fusion.  This module is not yet promoted over v9; it is
+the wiring target for the next training round.
+
 ## 1. What is an SSM?
 
 A state-space model (SSM) is a linear recurrence:
