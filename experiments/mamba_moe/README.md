@@ -269,6 +269,28 @@ not a Termux training run.  The CPU path is still useful for:
 - small overfit/debug runs
 - CM-sidecar inference and mixing
 
+### Unified 17-context word+char + CM gate + chunk-4
+
+10-minute T4 run of the unified architecture, not separate branches:
+
+- 23,992,969 params
+- 17-context full CM prior
+- word-level custom Mamba/MoE with bottom/top sandwich and top extension
+- conditional char-level custom Mamba/MoE
+- the char byte logits gated with the real CM prior
+- chunk-4 parallel scan on both branches
+- 4,439 steps in 600 s
+- word CE **4.322**
+- char bpc **1.171**
+- mean CM gate weight **0.706**
+
+Kernel: https://www.kaggle.com/code/shem42/nanlmv9-unified17-word-char-gated
+
+The char bpc is the byte branch metric, not the full word+char system bpc; it
+is not directly comparable to the 14/17 byte-residual numbers.  The important
+point is that word, char, CM gate, 17 contexts, and chunk-4 scan are now one
+run and one feedback graph.
+
 ### Expanded v9 CM context set
 
 `v9/nancm_ctx.c` is an experimental 22-context binary (14 stable + 8 extra:
