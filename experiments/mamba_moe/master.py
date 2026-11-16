@@ -180,7 +180,7 @@ def main():
     ap.add_argument("--seed", type=int, default=1337)
     ap.add_argument("--resume", default=None)
     ap.add_argument("--result-json", default=None)
-    ap.add_argument("--preset", choices=("10m", "d512", "100m"), default=None)
+    ap.add_argument("--preset", choices=("10m", "d512", "d512_chunk4", "100m", "100m_chunk4"), default=None)
     ap.add_argument("--preset-smoke", action="store_true")
     ap.add_argument("--max-seconds", type=float, default=None)
     ap.add_argument("--cm-dump", default=None, help="run gated CM residual eval after training")
