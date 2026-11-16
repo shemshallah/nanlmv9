@@ -63,6 +63,7 @@ def main():
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
 
+    os.makedirs(args.out, exist_ok=True)
     device = torch.device("cuda" if args.device == "auto" and torch.cuda.is_available() else ("cpu" if args.device == "auto" else args.device))
     meta = json.load(open(os.path.join(args.data_dir, "meta.json")))
     vocab = [bytes.fromhex(h) for h in meta["vocab_hex"]]
