@@ -13,6 +13,8 @@ sys.path.insert(0, os.path.join(HERE, "..", "..", "v9"))
 from bpe import BPE
 from cm_residual_smoke import load_window_bytes, build_word_map, encode_text
 from experimental import WordCharMamba
+from byte_layer import CMBytePrior
+from hybrid import ContextGate
 
 
 def main():
@@ -30,6 +32,9 @@ def main():
     ap.add_argument("--amp", action="store_true")
     ap.add_argument("--max-seconds", type=float, default=None)
     ap.add_argument("--result-json", default=None)
+    ap.add_argument("--cm-dump", default=None, help="real v9 CM byte prior for gated char branch")
+    ap.add_argument("--scan", choices=("sequential", "chunked"), default="sequential")
+    ap.add_argument("--scan-chunk", type=int, default=16)
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
     if args.device == "auto":
@@ -46,16 +51,26 @@ def main():
     recon = b"".join(vocab[i] for i in ids)
     byte_ids = list(recon)
     lengths_all = [len(vocab[i]) for i in ids]
+    offsets = []
+    pos = 0
+    for ln in lengths_all:
+        offsets.append(pos)
+        pos += ln
     print(f"tokens={len(ids):,} bytes={len(recon):,}")
 
     model = WordCharMamba(meta["vocab_size"], d_model=args.d_model,
-                          char_model=args.char_model, layers=1, n_experts=args.experts)
+                          char_model=args.char_model, layers=1, n_experts=args.experts,
+                          scan_mode=args.scan, scan_chunk=args.scan_chunk)
     model.to(device)
-    opt = torch.optim.AdamW(model.parameters(), lr=args.lr)
+    cm_prior = CMBytePrior.load(args.cm_dump) if args.cm_dump else None
+    gate = ContextGate(n_sources=2, hidden=64, extra_features=1).to(device) if cm_prior else None
+    params = list(model.parameters()) + (list(gate.parameters()) if gate else [])
+    opt = torch.optim.AdamW(params, lr=args.lr)
     print("params", f"{model.params():,}")
 
     t0 = __import__("time").time()
     last = (0.0, 0.0)
+    last_w_cm = 0.0
     for step in range(args.steps):
         if args.max_seconds and (__import__("time").time() - t0) >= args.max_seconds:
             print(f"time budget reached at step {step}")
@@ -64,7 +79,7 @@ def main():
         start = int(torch.randint(0, max(1, len(ids) - args.tokens - 1), (1,)))
         tids = ids[start:start + args.tokens]
         lens = lengths_all[start:start + args.tokens]
-        byte_start = sum(lengths_all[:start])
+        byte_start = offsets[start]
         nbytes = sum(lens)
         bids = byte_ids[byte_start:byte_start + nbytes]
         if len(bids) < 2:
@@ -83,15 +98,25 @@ def main():
             wl, cl, aux = model(tok_x, byte_x, char_extra_lens)
         wl, cl = wl.float(), cl.float()
         word_loss = F.cross_entropy(wl.reshape(-1, meta["vocab_size"]), tok_y.reshape(-1))
-        char_loss = F.cross_entropy(cl.reshape(-1, 256), byte_y.reshape(-1))
+        if cm_prior is not None:
+            cm_rows = [cm_prior.logits(byte_start + p) for p in range(1, len(bids))]
+            cm_logits = torch.stack(cm_rows).to(device)
+            ex = torch.linspace(0, 1, cm_logits.shape[0], device=device)[:, None]
+            char_mixed, cw = gate([cl.reshape(-1, 256), cm_logits], extra=ex)
+            char_loss = F.cross_entropy(char_mixed, byte_y.reshape(-1))
+            last_w_cm = float(cw[:, 1].mean())
+        else:
+            char_loss = F.cross_entropy(cl.reshape(-1, 256), byte_y.reshape(-1))
+            last_w_cm = 0.0
         loss = word_loss + char_loss + 0.01 * (aux if torch.is_tensor(aux) else 0.0)
-        opt.zero_grad(); loss.backward(); torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0); opt.step()
+        opt.zero_grad(); loss.backward(); torch.nn.utils.clip_grad_norm_(params, 1.0); opt.step()
         last = (float(word_loss), float(char_loss) / math.log(2))
         if step % 2 == 0:
             print(f"step {step:3d} word_ce={last[0]:.4f} char_bpc={last[1]:.4f}")
     if args.result_json:
         json.dump({"word_ce": last[0], "char_bpc": last[1], "params": model.params(),
-                   "config": vars(args)}, open(args.result_json, "w"), indent=1)
+                   "mean_w_cm": last_w_cm, "config": vars(args)},
+                  open(args.result_json, "w"), indent=1)
     torch.save({"model": model.state_dict(), "config": vars(args),
                 "meta": {"vocab_size": meta["vocab_size"]}},
                os.path.join(args.out, "last.pt"))

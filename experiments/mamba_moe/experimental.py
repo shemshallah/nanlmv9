@@ -72,17 +72,20 @@ class WordCharMamba(torch.nn.Module):
     token->byte trie.
     """
 
-    def __init__(self, vocab_size, d_model=256, char_model=64, layers=2, n_experts=64):
+    def __init__(self, vocab_size, d_model=256, char_model=64, layers=2, n_experts=64,
+                 scan_mode="sequential", scan_chunk=16):
         super().__init__()
         self.word = MambaMoE(
             vocab_size, d_model=d_model, n_layers=layers, n_experts=n_experts,
             rank=8, top_k=2, shared_hidden=2 * d_model, moe_position="ffn",
             pair_matrix=True, sandwich=True,
+            scan_mode=scan_mode, scan_chunk=scan_chunk,
         )
         self.char = MambaMoE(
             256, d_model=char_model, n_layers=layers, n_experts=n_experts,
             rank=8, top_k=2, shared_hidden=2 * char_model, moe_position="ffn",
             pair_matrix=True, sandwich=False,
+            scan_mode=scan_mode, scan_chunk=scan_chunk,
         )
         self.word_to_char = torch.nn.Linear(d_model, char_model, bias=False)
 
