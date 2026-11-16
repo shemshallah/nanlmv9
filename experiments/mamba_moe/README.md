@@ -273,7 +273,10 @@ not a Termux training run.  The CPU path is still useful for:
 
 10-minute T4 run of the unified architecture, not separate branches:
 
-- 23,992,969 params
+- **23,992,969 params** total
+  - word branch: 23,568,903
+  - char branch: 358,530
+  - word→char bridge: 65,536
 - 17-context full CM prior
 - word-level custom Mamba/MoE with bottom/top sandwich and top extension
 - conditional char-level custom Mamba/MoE
