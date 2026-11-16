@@ -38,7 +38,7 @@ def main():
    pos=bs+1; m=min(len(a1),maxbyte-pos); bt1[pos:pos+m]=a1[:m]; bt5[pos:pos+m]=a5[:m]; have[pos:pos+m]=True
    bm=boundary_metrics(out['boundary_logits'],tl); # aggregate via counts approximated from f1? recompute mask
    from unified import predict_boundaries
-   mask=predict_boundaries(out['boundary_logits']).cpu(); gold=torch.zeros_like(mask); ends=(torch.cumsum(tl,1)-1).clamp(0,mask.shape[1]-1); gold.scatter_(1,ends,True)
+   mask=predict_boundaries(out['boundary_logits']).cpu(); gold=torch.zeros_like(mask); ends=(torch.cumsum(tl.cpu(),1)-1).clamp(0,mask.shape[1]-1); gold.scatter_(1,ends,True)
    tp+=int((mask&gold).sum()); fp+=int((mask&~gold).sum()); fn+=int((~mask&gold).sum())
  prec=tp/max(1,tp+fp); rec=tp/max(1,tp+fn); f1=2*prec*rec/max(1e-9,prec+rec)
  # word and sentence groups over the scored target bytes
