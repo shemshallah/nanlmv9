@@ -314,6 +314,17 @@ With the larger 229,376-byte CM dump (64×4k windows) and 1,999 scored bytes:
 
 Mean gate weight: **0.243 neural / 0.757 CM**; minimum CM weight 0.208.
 
+The full **1,121,681-byte** CM prior (matching `win_valid_full.bin`) gives, on
+1,000 scored bytes:
+
+| source | bpc |
+|---|---:|
+| neural only | 3.2210 |
+| CM only | 2.0304 |
+| gated hybrid | **1.7025** |
+
+Mean gate weight: **0.232 neural / 0.768 CM**.
+
 ## 7. Kaggle 20-step GPU smoke results
 
 These are **20-step shape/step smokes**, not converged models.  They exist to
