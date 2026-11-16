@@ -50,8 +50,7 @@ only smoke-tested / needs a longer run; `[ ]` still open.
 - [x] 4k evaluation windows
 - [x] local token context 0/4/8/16
 - [x] multi-order retrieval contexts 2/4/6
-- [ ] exhaustive extra CM contexts (sparse, indirect, record, word suffix,
-      line position, case-folded word, previous-word+length)
+- [x] first exhaustive sweep: 14 vs 22 vs 26 contexts (26 hurts; 22 best online)
 - [ ] context-set sweep until marginal bpc turns negative
 - [ ] full context ablation table on full valid
 

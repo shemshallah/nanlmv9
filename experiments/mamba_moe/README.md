@@ -257,6 +257,10 @@ The model and tokenizer run on Termux, but CPU training is the bottleneck:
   is not a converged model, it only proves the train/eval path
 - at ~28 tok/s, one epoch over 47M tokens is ~19 days on this phone
 
+A 10-minute word+char GPU smoke (`train_word_char.py`, 23.99M params) reached
+word CE **0.708** and char bpc **1.0708** on a small overfit window.  This is a
+wiring/smoke result, not a benchmark.
+
 The full 256-expert model is larger and slower.  This is a GPU/cloud experiment,
 not a Termux training run.  The CPU path is still useful for:
 
