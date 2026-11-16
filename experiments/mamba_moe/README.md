@@ -4,6 +4,35 @@ This directory is the 32k-tokenizer + neural/hybrid branch that sits beside the
 v9 C context-mixing core.  It is deliberately small enough to run on Termux for
 smoke tests, while matching the architecture shape that can scale on a GPU.
 
+### Unified d256 held-out metrics — first complete 1/5 report
+
+5-minute unified d256 run on 512 KB natural wt2 train, CM + multimatch retrieval,
+boundary head, chunk-4.  12,744,849 params.  Held-out full wt2 valid, 20 chunks,
+4,221 scored bytes:
+
+| metric | top-1 | top-5 |
+|---|---:|---:|
+| byte | 0.1772 | 0.3851 |
+| token/subword | 0.3320 | 0.5031 |
+| word (strict all bytes) | 0.0000 | 0.0462 |
+| sentence strict | 0.0000 | 0.0000 |
+
+| continuous metric | value |
+|---|---:|
+| word bpb | **2.2714** |
+| char bpc | 1.9635 |
+| sentence mean byte accuracy | 0.2033 / 0.4571 |
+| boundary precision | 0.8935 |
+| boundary recall | 0.5538 |
+| boundary F1 | 0.6838 |
+
+The metrics harness is `unified_metrics.py`; the training entry is
+`train_unified.py`.  The model is undertrained (5 minutes on 512 KB), so these
+are pipeline metrics, not quality claims.  Word/sentence strict top-1 is still
+zero because every byte must be correct.
+
+Kernel: https://www.kaggle.com/code/shem42/nanlmv9-unified-d256-metrics
+
 ## Unified byte-first architecture
 
 `unified.py` is the new single graph:
