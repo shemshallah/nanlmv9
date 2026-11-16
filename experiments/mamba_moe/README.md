@@ -269,6 +269,34 @@ not a Termux training run.  The CPU path is still useful for:
 - small overfit/debug runs
 - CM-sidecar inference and mixing
 
+### d256 WikiText-103 8MB natural corpus — 10-minute held-out smoke
+
+A larger corpus was finally used: **8 MB of WikiText-103 train** (16× the
+previous 512 KB slice), with a 512 KB 17-context CM prefix prior.
+
+- no WordNet/wordlist word-prior loss (removed; it was badly mismatched)
+- true previous-token-only char conditioning
+- CM gate dropout/entropy/cap
+- d256, chunk-4, 10 minutes T4
+
+| metric | value |
+|---|---:|
+| params | 10,621,257 |
+| steps | 2,351 |
+| train word CE | 4.934 |
+| train char bpc | 3.988 |
+| **held-out word bpb** | **2.1122** |
+| held-out char bpc | 1.9035 |
+| held-out CM gate weight | 0.6659 |
+
+The larger, more diverse corpus did **not** improve the 10-minute held-out
+score (2.112 vs 1.970 on 512 KB wt2).  The run only sees ~150K word tokens in
+10 minutes, so 8 MB is not exhausted; this is an optimization/data-throughput
+limit, not evidence that the larger corpus is bad.  CM was active only on the
+512 KB prefix, and the gate no longer saturated.
+
+Kernel: https://www.kaggle.com/code/shem42/nanlmv9-d256-wt103-10min
+
 ### d256 regulated natural-text run — 10-minute held-out smoke
 
 Applied the four requested changes:
