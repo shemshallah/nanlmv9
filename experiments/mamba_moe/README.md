@@ -282,10 +282,14 @@ not a Termux training run.  The CPU path is still useful for:
 - conditional char-level custom Mamba/MoE
 - the char byte logits gated with the real CM prior
 - chunk-4 parallel scan on both branches
-- 4,439 steps in 600 s
+- 4,439 steps in 600 s (10-minute run)
 - word CE **4.322**
 - char bpc **1.171**
 - mean CM gate weight **0.706**
+
+The final 5-minute smoke on the same unified path ran **2,117 steps**:
+word CE **7.093**, char bpc **1.406**, mean CM gate **0.832**.  It is less
+trained, but the full word+char + CM gate + chunk-4 path completes cleanly.
 
 Kernel: https://www.kaggle.com/code/shem42/nanlmv9-unified17-word-char-gated
 
