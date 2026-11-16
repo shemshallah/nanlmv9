@@ -7,3 +7,4 @@ __pycache__/
 *.ckpt
 *.pt
 /v9/nancm_ctx
+/v9/nancm_ctx17
