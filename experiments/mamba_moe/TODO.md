@@ -39,8 +39,8 @@ only smoke-tested / needs a longer run; `[ ]` still open.
 - [x] `CMBytePrior` loader with residual smoothing
 - [x] real CM prior + token→byte + neural gate smoke
 - [x] learned gate relies on CM (mean 0.791 CM weight on the smoke)
-- [~] full Mamba model backward through token->byte trie + CM prior (`train_byte_residual.py`, smoke done)
-- [ ] v9 CM prior dump for the full 1.12 MB valid split (currently 8×4k windows)
+- [x] full Mamba model backward through token->byte trie + CM prior (10-min GPU, 153 steps, 2.205 byte bpc)
+- [x] v9 CM prior dump for the full 1.12 MB valid split (1,121,681 bytes)
 - [ ] train/validate the hybrid on the full valid split
 
 ## Contexts
