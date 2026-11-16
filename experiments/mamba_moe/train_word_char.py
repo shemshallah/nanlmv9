@@ -35,6 +35,8 @@ def main():
     ap.add_argument("--cm-dump", default=None, help="real v9 CM byte prior for gated char branch")
     ap.add_argument("--scan", choices=("sequential", "chunked"), default="sequential")
     ap.add_argument("--scan-chunk", type=int, default=16)
+    ap.add_argument("--save-interval", type=int, default=500)
+    ap.add_argument("--resume", default=None)
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
     if args.device == "auto":
@@ -66,12 +68,22 @@ def main():
     gate = ContextGate(n_sources=2, hidden=64, extra_features=1).to(device) if cm_prior else None
     params = list(model.parameters()) + (list(gate.parameters()) if gate else [])
     opt = torch.optim.AdamW(params, lr=args.lr)
+    start_step = 0
+    if args.resume:
+        ck = torch.load(args.resume, map_location=device)
+        model.load_state_dict(ck["model"])
+        if gate is not None and ck.get("gate") is not None:
+            gate.load_state_dict(ck["gate"])
+        if "opt" in ck:
+            opt.load_state_dict(ck["opt"])
+        start_step = ck.get("step", 0)
+        print(f"resumed at step {start_step}")
     print("params", f"{model.params():,}")
 
     t0 = __import__("time").time()
     last = (0.0, 0.0)
     last_w_cm = 0.0
-    for step in range(args.steps):
+    for step in range(start_step, args.steps):
         if args.max_seconds and (__import__("time").time() - t0) >= args.max_seconds:
             print(f"time budget reached at step {step}")
             break
@@ -111,13 +123,19 @@ def main():
         loss = word_loss + char_loss + 0.01 * (aux if torch.is_tensor(aux) else 0.0)
         opt.zero_grad(); loss.backward(); torch.nn.utils.clip_grad_norm_(params, 1.0); opt.step()
         last = (float(word_loss), float(char_loss) / math.log(2))
+        if args.save_interval and (step + 1) % args.save_interval == 0:
+            torch.save({"model": model.state_dict(), "gate": gate.state_dict() if gate else None,
+                        "opt": opt.state_dict(), "step": step + 1, "config": vars(args),
+                        "meta": {"vocab_size": meta["vocab_size"]}},
+                       os.path.join(args.out, "last.pt"))
         if step % 2 == 0:
             print(f"step {step:3d} word_ce={last[0]:.4f} char_bpc={last[1]:.4f}")
     if args.result_json:
         json.dump({"word_ce": last[0], "char_bpc": last[1], "params": model.params(),
                    "mean_w_cm": last_w_cm, "config": vars(args)},
                   open(args.result_json, "w"), indent=1)
-    torch.save({"model": model.state_dict(), "config": vars(args),
+    torch.save({"model": model.state_dict(), "gate": gate.state_dict() if gate else None,
+                "opt": opt.state_dict(), "step": step + 1, "config": vars(args),
                 "meta": {"vocab_size": meta["vocab_size"]}},
                os.path.join(args.out, "last.pt"))
     print("saved", os.path.join(args.out, "last.pt"))
