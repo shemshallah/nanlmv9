@@ -17,6 +17,36 @@ from byte_layer import CMBytePrior
 from hybrid import ContextGate
 
 
+def eval_heldout(model, gate, cm_prior, ids, lens, offs, recon, vocab_size, tokens, chunks, device):
+    model.eval()
+    seq = min(tokens, len(ids) - 1)
+    chunks = min(chunks, max(1, (len(ids) - seq - 1) // seq))
+    wsum = wcnt = csum = ccnt = 0.0
+    wcm = 0.0
+    with torch.no_grad():
+        for k in range(chunks):
+            st = k * seq
+            tids = ids[st:st+seq+1]; ls = lens[st:st+seq]; bst = offs[st]; nb = sum(ls)
+            bids = list(recon[bst:bst+nb])
+            tx=torch.tensor(tids[:-1],dtype=torch.long,device=device)[None]; ty=torch.tensor(tids[1:],dtype=torch.long,device=device)[None]
+            bx=torch.tensor(bids[:-1],dtype=torch.long,device=device)[None]; by=torch.tensor(bids[1:],dtype=torch.long,device=device)[None]
+            tl=torch.tensor(ls[:-1],dtype=torch.long,device=device); extra=tl.clone()
+            if int(extra.sum())>bx.shape[1]: extra[-1]-=int(extra.sum())-bx.shape[1]
+            wl,cl,_=model(tx,bx,extra,previous_only=True)
+            wl,cl=wl.float().reshape(-1,vocab_size),cl.float().reshape(-1,256)
+            wsum+=float(F.cross_entropy(wl,ty.reshape(-1),reduction='sum')); wcnt+=ty.numel()
+            if cm_prior is not None:
+                rows=[cm_prior.logits(bst+p) for p in range(1,len(bids))]
+                cm=torch.stack(rows).to(device); ex=torch.linspace(0,1,cm.shape[0],device=device)[:,None]
+                mixed,cw=gate([cl,cm],extra=ex); wcm+=float(cw[:,1].sum()); csum+=float(F.cross_entropy(mixed,by.reshape(-1),reduction='sum'))
+            else:
+                csum+=float(F.cross_entropy(cl,by.reshape(-1),reduction='sum'))
+            ccnt+=by.numel()
+    model.train()
+    return {"eval_chunks":chunks,"eval_tokens":int(wcnt),"eval_bytes":int(ccnt),
+            "eval_word_ce":wsum/max(1,wcnt),"eval_word_bpb":(wsum/max(1,wcnt))/math.log(2)/(len(recon)/len(ids)),
+            "eval_char_bpc":csum/math.log(2)/max(1,ccnt),"eval_mean_w_cm":wcm/max(1,ccnt) if cm_prior else 0.0}
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data-dir", default=os.path.expanduser("~/nanlm-data/tok32k_mixed"))
@@ -37,6 +67,9 @@ def main():
     ap.add_argument("--scan-chunk", type=int, default=16)
     ap.add_argument("--save-interval", type=int, default=500)
     ap.add_argument("--resume", default=None)
+    ap.add_argument("--eval-window", default=None)
+    ap.add_argument("--eval-cm-dump", default=None)
+    ap.add_argument("--eval-chunks", type=int, default=20)
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
     if args.device == "auto":
@@ -130,9 +163,20 @@ def main():
                        os.path.join(args.out, "last.pt"))
         if step % 2 == 0:
             print(f"step {step:3d} word_ce={last[0]:.4f} char_bpc={last[1]:.4f}")
+    eval_metrics = {}
+    if args.eval_window:
+        eraw = load_window_bytes(args.eval_window)
+        eids = encode_text(eraw.decode("utf-8", "surrogateescape"), bpe, word_to_id)
+        erecon = b"".join(vocab[i] for i in eids)
+        elens = [len(vocab[i]) for i in eids]; eoffs=[]; pp=0
+        for l in elens: eoffs.append(pp); pp+=l
+        eprior = CMBytePrior.load(args.eval_cm_dump) if args.eval_cm_dump else None
+        eval_metrics = eval_heldout(model, gate, eprior, eids, elens, eoffs, erecon,
+                                    meta["vocab_size"], args.tokens, args.eval_chunks, device)
+        print("heldout", json.dumps(eval_metrics))
     if args.result_json:
         json.dump({"word_ce": last[0], "char_bpc": last[1], "params": model.params(),
-                   "mean_w_cm": last_w_cm, "config": vars(args)},
+                   "mean_w_cm": last_w_cm, "heldout": eval_metrics, "config": vars(args)},
                   open(args.result_json, "w"), indent=1)
     torch.save({"model": model.state_dict(), "gate": gate.state_dict() if gate else None,
                 "opt": opt.state_dict(), "step": step + 1, "config": vars(args),
