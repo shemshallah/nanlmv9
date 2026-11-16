@@ -326,6 +326,17 @@ The full **1,121,681-byte** CM prior (matching `win_valid_full.bin`) gives, on
 
 Mean gate weight: **0.232 neural / 0.768 CM**.
 
+The 17-context full prior, same 1,000-byte slice:
+
+| source | bpc |
+|---|---:|
+| subtle CM only | 2.1015 |
+| gated hybrid | 1.7562 |
+
+Mean gate weight: **0.242 neural / 0.758 CM**.  The 17-context prior is not a
+free win over the 14-context prior at this scale; the 10-minute full-model run
+is the deciding experiment.
+
 ## 7. Kaggle 20-step GPU smoke results
 
 These are **20-step shape/step smokes**, not converged models.  They exist to
