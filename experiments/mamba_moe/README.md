@@ -280,6 +280,7 @@ Full train on Shakespeare + wt2_train, `-tshift 3`, 8×4k valid windows:
 | context set | frozen bpc | online bpc | wall |
 |---|---:|---:|---:|
 | 14 stable | **1.5902** | 1.5202 | 4m59 |
+| 17 selected | 1.5924 | 1.5193 | ~5m40 |
 | 22 expanded | 1.5983 | **1.5128** | 7m07 |
 | 26 expanded | 1.6100 | 1.5176 | 11m28 |
 
