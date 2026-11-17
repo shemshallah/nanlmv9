@@ -198,6 +198,12 @@ class UnifiedByteLM(nn.Module):
             "word_ends": ends,
         }
 
+    def segment(self, byte_ids, threshold=0.5):
+        """Predicted-boundary forward: returns per-batch segment lengths."""
+        h = self.byte_encoder(byte_ids)
+        logits = self.boundary(h)
+        return boundary_lengths(logits, threshold), logits
+
     def fuse_bytes(self, char_logits, cm_logits=None, ret_logits=None,
                    extra=None, training=False, source_drop=0.1, cap=0.9):
         sources = [char_logits]
@@ -249,6 +255,15 @@ def boundary_lengths(boundary_logits, threshold=0.5):
             prev = i
         out.append(lens)
     return out
+
+
+def tune_boundary_threshold(boundary_logits, gold_lengths, thresholds=(0.2,0.3,0.4,0.5,0.6,0.7,0.8)):
+    best = None
+    for t in thresholds:
+        m = boundary_metrics(boundary_logits, gold_lengths, t)
+        if best is None or m["boundary_f1"] > best["boundary_f1"]:
+            best = dict(m); best["threshold"] = t
+    return best
 
 
 def boundary_metrics(boundary_logits, gold_lengths, threshold=0.5):

@@ -1,0 +1,14 @@
+{
+  "id": "shem42/nanlmv9-unified-d256-v2-metrics",
+  "title": "nanlmv9 unified d256 v2 metrics",
+  "code_file": "kaggle_unified_v2.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": [],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "model_sources": []
+}

@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "..", "v9"))
 from bpe import BPE
 from byte_layer import ByteTrie, CMBytePrior
 from cm_residual_smoke import load_window_bytes, build_word_map, encode_text
-from unified import UnifiedByteLM, boundary_loss, normalized_word_bpb, fusion_features, boundary_metrics
+from unified import UnifiedByteLM, boundary_loss, normalized_word_bpb, fusion_features, boundary_metrics, tune_boundary_threshold
 from retrieval import MultiMatchIndex
 
 
@@ -58,6 +58,8 @@ def main():
     ap.add_argument("--eval-chunks", type=int, default=20)
     ap.add_argument("--retrieval", choices=("none", "multimatch"), default="none")
     ap.add_argument("--retrieval-order", type=int, default=4)
+    ap.add_argument("--boundary-weight", type=float, default=0.5)
+    ap.add_argument("--boundary-threshold", type=float, default=0.5)
     ap.add_argument("--save-interval", type=int, default=500)
     ap.add_argument("--result-json", default=None)
     ap.add_argument("--selftest", action="store_true")
@@ -95,7 +97,7 @@ def main():
         for l in elens: eoffs.append(pp); pp+=l
         ep = CMBytePrior.load(args.eval_cm_dump) if args.eval_cm_dump else None
         n = min(args.tokens, len(eids)-1); chunks = min(args.eval_chunks, max(1,(len(eids)-n-1)//n))
-        wsum=wcnt=0.0; csum=ccnt=0.0; wcm=0.0
+        wsum=wcnt=0.0; csum=ccnt=0.0; wcm=0.0; wchar=0.0; wret=0.0; last_bm=None
         with torch.no_grad():
             for k in range(chunks):
                 tids,ls,bids,bs=chunk(eids,elens,erecon,eoffs,k*n,n)
@@ -115,10 +117,13 @@ def main():
                     extra=torch.tensor(ep.probs[bs+1:bs+len(bids),0],dtype=torch.float32,device=device)[:,None]
                     ret_l=retriever.logits(byte_contexts(bids,args.retrieval_order)).to(device) if retriever is not None else None
                     mixed,w,_=model.fuse_bytes(out["char_logits"], cm_l, ret_l, extra=extra, training=False, cap=0.9)
-                    cl=mixed.reshape(-1,256); wcm+=float(w[:,1].mean())
+                    cl=mixed.reshape(-1,256); wcm+=float(w[:,1].mean()); wchar+=float(w[:,0].mean())
+                    if w.shape[1] > 2: wret+=float(w[:,2].mean())
                 csum+=float(F.cross_entropy(cl,by.reshape(-1),reduction="sum")); ccnt+=by.numel()
-        bm = boundary_metrics(out["boundary_logits"], tl)
-        return {"word_bpb":wsum/math.log(2)/max(1,wcnt),"char_bpc":csum/math.log(2)/max(1,ccnt),"cm_weight":wcm/max(1,chunks),"bytes":int(ccnt),**bm}
+        bm = tune_boundary_threshold(out["boundary_logits"], tl)
+        return {"word_bpb":wsum/math.log(2)/max(1,wcnt),"char_bpc":csum/math.log(2)/max(1,ccnt),
+                "char_weight":wchar/max(1,chunks),"cm_weight":wcm/max(1,chunks),
+                "retrieval_weight":wret/max(1,chunks),"bytes":int(ccnt),**bm}
 
     t0=time.time(); n=args.tokens
     for step in range(args.steps):
@@ -148,7 +153,7 @@ def main():
             mixed,w,_=model.fuse_bytes(out["char_logits"],cm_l,ret_l,extra=extra,training=True,cap=0.9)
             cl=mixed.reshape(-1,256)
         char_loss=F.cross_entropy(cl,by.reshape(-1))
-        loss=word_ce+0.1*bloss+0.1*char_loss
+        loss=word_ce+args.boundary_weight*bloss+0.1*char_loss
         opt.zero_grad(); loss.backward(); torch.nn.utils.clip_grad_norm_(model.parameters(),1.0); opt.step()
         if step%10==0: print(f"step {step:5d} word_ce={float(word_ce):.4f} char_bpc={float(char_loss)/math.log(2):.4f} bnd={float(bloss):.4f}")
         if args.save_interval and (step+1)%args.save_interval==0:
