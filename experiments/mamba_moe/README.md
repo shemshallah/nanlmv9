@@ -4,6 +4,39 @@ This directory is the 32k-tokenizer + neural/hybrid branch that sits beside the
 v9 C context-mixing core.  It is deliberately small enough to run on Termux for
 smoke tests, while matching the architecture shape that can scale on a GPU.
 
+### Unified d256 v2 metrics — boundary tuning + partial credit + source weights
+
+5-minute held-out full wt2 valid run, 20 chunks / 4,221 bytes, 12.74M params.
+
+| metric | top-1 | top-5 |
+|---|---:|---:|
+| byte | **0.5723** | **0.7599** |
+| token/subword | 0.3313 | 0.4992 |
+| word strict | **0.1513** | 0.4930 |
+| word mean byte accuracy | 0.5501 | 0.8420 |
+| sentence strict | 0.0000 | 0.0000 |
+| sentence mean byte accuracy | 0.6603 | 0.8845 |
+
+| continuous metric | value |
+|---|---:|
+| word bpb | **2.2980** |
+| char bpc | 1.9548 |
+| boundary precision | 0.8644 |
+| boundary recall | **0.6512** |
+| boundary F1 | **0.7428** |
+| best boundary threshold | 0.5 |
+| held-out char weight | 0.0401 |
+| held-out CM weight | **0.9401** |
+| held-out retrieval weight | 0.0198 |
+
+Boundary loss weight 0.5 improved recall from 0.554 → 0.651 and F1 from
+0.684 → 0.743.  Partial word/sentence metrics now expose the model instead of
+all-zero strict scores.  Retrieval is being ignored by the gate (0.02), and CM
+dominates (0.94); the char branch is nearly switched off on held-out data.
+That is the next gate/retrieval problem, not a metric problem.
+
+Kernel: https://www.kaggle.com/code/shem42/nanlmv9-unified-d256-v2-metrics
+
 ### Unified d256 held-out metrics — first complete 1/5 report
 
 5-minute unified d256 run on 512 KB natural wt2 train, CM + multimatch retrieval,
