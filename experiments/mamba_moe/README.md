@@ -74,7 +74,10 @@ Kernel: https://www.kaggle.com/code/shem42/nanlmv9-unified-d256-metrics
 - learned boundary head
 - byte→word feedback via gathered token-end byte states
 - word/concept Mamba/MoE with bottom/top sandwich, shared experts, pair matrices, mirror points
+- byte-fed word head: `head_input = word_hidden + head_byte(token_end_byte_state)`
 - past-only word→char bridge
+- **word-head → byte feedback**: top-k expected word embedding from the word
+  head distribution is projected back into the char decoder
 - char SSM decoder
 - normalized word-token likelihood through the byte bijection
 - calibrated CM/retrieval fusion with source dropout, entropy bonus and weight cap

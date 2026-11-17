@@ -152,6 +152,8 @@ class UnifiedByteLM(nn.Module):
             mirror_points=mirror_points,
         )
         self.word_to_char = nn.Linear(d_model, char_model, bias=False)
+        self.head_byte = nn.Linear(d_model, d_model, bias=False)
+        self.word_feedback = nn.Linear(d_model, char_model, bias=False)
         self.char = MambaMoE(
             256, d_model=char_model, n_layers=char_layers, d_state=d_state,
             n_experts=experts, rank=rank, top_k=2, shared_hidden=2 * char_model,
@@ -173,22 +175,40 @@ class UnifiedByteLM(nn.Module):
         boundary_logits = self.boundary(byte_h)  # [B,Lb]
         end_feats, ends = self.gather_word_ends(byte_h, token_lengths)
         word_extra = self.byte_to_word(end_feats)
+        # Byte-fed word head: the token-end byte state is added to the word
+        # representation before the word head.
         word_hidden = self.word.encode(token_ids, extra=word_extra)
-        word_logits = self.word.head(word_hidden)  # [B,Lt,V]
+        head_input = word_hidden + self.head_byte(end_feats)
+        word_logits = self.word.head(head_input)  # [B,Lt,V]
 
-        # Past-only word state for the char decoder: shift by one token.
+        # Word-head -> byte feedback: a sparse top-k expectation of the next
+        # word distribution is projected back into the char decoder.  This is
+        # the differentiable loop from word head output to bytes.
+        probs = F.softmax(word_logits, -1)
+        k = min(8, probs.shape[-1])
+        topv, topi = torch.topk(probs, k, dim=-1)
+        wvec = (topv.unsqueeze(-1) * self.word.embed.weight[topi]).sum(2)
+
+        # Past-only word state + past-only word-head output for the char decoder.
         past = torch.cat([torch.zeros_like(word_hidden[:, :1]), word_hidden[:, :-1]], dim=1)
+        past_w = torch.cat([torch.zeros_like(wvec[:, :1]), wvec[:, :-1]], dim=1)
         if past.shape[1] != token_lengths.shape[1]:
             past = past[:, : token_lengths.shape[1]]
+            past_w = past_w[:, : token_lengths.shape[1]]
         past_flat = past.reshape(-1, past.shape[-1])
+        pw_flat = past_w.reshape(-1, past_w.shape[-1])
         ctx_flat = torch.repeat_interleave(past_flat, token_lengths.reshape(-1), dim=0)
+        cw_flat = torch.repeat_interleave(pw_flat, token_lengths.reshape(-1), dim=0)
         ctx = ctx_flat.reshape(byte_ids.shape[0], -1, past.shape[-1])
+        cw = cw_flat.reshape(byte_ids.shape[0], -1, past_w.shape[-1])
         if ctx.shape[1] > byte_ids.shape[1]:
-            ctx = ctx[:, : byte_ids.shape[1]]
+            ctx = ctx[:, : byte_ids.shape[1]]; cw = cw[:, : byte_ids.shape[1]]
         elif ctx.shape[1] < byte_ids.shape[1]:
             pad = ctx[:, -1:].expand(-1, byte_ids.shape[1] - ctx.shape[1], -1)
-            ctx = torch.cat([ctx, pad], dim=1)
-        char_logits, _ = self.char(byte_ids, extra=self.word_to_char(ctx))
+            pwd = cw[:, -1:].expand(-1, byte_ids.shape[1] - cw.shape[1], -1)
+            ctx = torch.cat([ctx, pad], dim=1); cw = torch.cat([cw, pwd], dim=1)
+        char_extra = self.word_to_char(ctx) + self.word_feedback(cw)
+        char_logits, _ = self.char(byte_ids, extra=char_extra)
         return {
             "word_logits": word_logits,
             "char_logits": char_logits,
